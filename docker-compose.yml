@@ -1,0 +1,41 @@
+services:
+  db:
+    image: postgres:16
+    container_name: fuel_db
+    environment:
+      POSTGRES_USER: fuel
+      POSTGRES_PASSWORD: fuel
+      POSTGRES_DB: fuelprices
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  backend:
+    build: ./backend
+    container_name: fuel_api
+    depends_on:
+      - db
+    env_file:
+      - config.env
+    environment:
+      DATABASE_URL: postgresql://fuel:fuel@db:5432/fuelprices
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/app:/app
+
+  frontend:
+    build: ./frontend
+    container_name: fuel_web
+    depends_on:
+      - backend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/index.html:/app/index.html
+      - /app/node_modules
+
+volumes:
+  pgdata:
