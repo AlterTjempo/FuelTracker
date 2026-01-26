@@ -35,9 +35,12 @@ class DataCollector:
         
         async with httpx.AsyncClient(timeout=30.0) as client:
             try:
+                print(f"Requesting URL: {url} with params: {params}")
                 response = await client.get(url, params=params)
+                print(f"Response status: {response.status_code}")
                 response.raise_for_status()
                 data = response.json()
+                print(f"Response data keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
                 
                 if data.get("ok"):
                     return data
@@ -46,7 +49,9 @@ class DataCollector:
                     return None
                     
             except Exception as e:
-                print(f"Error fetching stations: {e}")
+                print(f"Error fetching stations: {type(e).__name__}: {str(e)}")
+                import traceback
+                traceback.print_exc()
                 return None
     
     async def fetch_prices_for_stations(
@@ -126,14 +131,23 @@ class DataCollector:
             # Only save if station exists and has price data
             if price_info.get("status") != "open":
                 continue
+            
+            # Convert false values (unavailable fuel types) to None
+            e5 = price_info.get("e5")
+            e10 = price_info.get("e10")
+            diesel = price_info.get("diesel")
+            
+            e5 = e5 if e5 is not False else None
+            e10 = e10 if e10 is not False else None
+            diesel = diesel if diesel is not False else None
                 
             new_price = FuelPrice(
                 id=str(uuid.uuid4()),
                 station_id=station_id,
                 timestamp=timestamp,
-                e5=price_info.get("e5"),
-                e10=price_info.get("e10"),
-                diesel=price_info.get("diesel")
+                e5=e5,
+                e10=e10,
+                diesel=diesel
             )
             db.add(new_price)
         
@@ -142,6 +156,8 @@ class DataCollector:
     async def fetch_and_store_prices(self):
         """Main function to fetch and store fuel prices"""
         print(f"[{datetime.utcnow()}] Starting data collection...")
+        print(f"Config - API Key: {'***' + self.api_key[-4:] if self.api_key else 'MISSING'}")
+        print(f"Config - Lat: {settings.LATITUDE}, Lng: {settings.LONGITUDE}, Range: {settings.RANGE}")
         
         db = SessionLocal()
         try:
