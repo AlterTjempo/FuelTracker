@@ -74,20 +74,19 @@
     return '#ef4444'
   }
   
+  // Create formatter once to avoid recreating on every formatDate call
+  const dateFormatter = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/Berlin',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  })
+  
   function formatDate(timestamp) {
-    const date = new Date(timestamp)
-    // Use Intl.DateTimeFormat with Europe/Berlin timezone to handle DST automatically
-    const formatter = new Intl.DateTimeFormat('en-GB', {
-      timeZone: 'Europe/Berlin',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false
-    })
-    
-    return formatter.format(date)
+    return dateFormatter.format(new Date(timestamp))
   }
 </script>
 
