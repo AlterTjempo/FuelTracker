@@ -3,10 +3,11 @@
   import CurrentPrices from './components/CurrentPrices.svelte'
   import LowestPrices from './components/LowestPrices.svelte'
   import Statistics from './components/Statistics.svelte'
-  import MapView from './components/MapView.svelte'
+  import GoNowIndicator from './components/GoNowIndicator.svelte'
   
   let selectedFuelType = 'e5'
   let selectedHours = 24
+  let activeTab = 'overview'
   
   const timeRanges = [
     { label: '24h', hours: 24 },
@@ -62,31 +63,47 @@
       </div>
     </div>
 
-    <div class="main-chart">
-      <PriceChart fuelType={selectedFuelType} hours={selectedHours} />
+    <div class="tabs">
+      <button class:active={activeTab === 'overview'} on:click={() => activeTab = 'overview'}>
+        📊 Overview
+      </button>
+      <button class:active={activeTab === 'leaderboard'} on:click={() => activeTab = 'leaderboard'}>
+        🏆 Literboard
+      </button>
+      <button class:active={activeTab === 'stations'} on:click={() => activeTab = 'stations'}>
+        ⛽ All Stations
+      </button>
     </div>
 
-    <div class="grid">
-      <div class="card">
-        <h2>📊 Statistics</h2>
-        <Statistics fuelType={selectedFuelType} hours={selectedHours} />
+    {#if activeTab === 'overview'}
+      <GoNowIndicator fuelType={selectedFuelType} />
+
+      <div class="main-chart">
+        <PriceChart fuelType={selectedFuelType} hours={selectedHours} />
       </div>
-      
-      <div class="card">
-        <h2>🏆 Lowest Prices</h2>
-        <LowestPrices fuelType={selectedFuelType} hours={selectedHours} />
+
+      <div class="grid">
+        <div class="card">
+          <h2>📊 Statistics</h2>
+          <Statistics fuelType={selectedFuelType} hours={selectedHours} />
+        </div>
+        
+        <div class="card">
+          <h2>🏆 Lowest Prices</h2>
+          <LowestPrices fuelType={selectedFuelType} hours={selectedHours} />
+        </div>
       </div>
-    </div>
-
-    <div class="card">
-      <h2>🗺️ Stations on Map</h2>
-      <MapView fuelType={selectedFuelType} />
-    </div>
-
-    <div class="card">
-      <h2>⛽ Current Prices at Stations</h2>
-      <CurrentPrices fuelType={selectedFuelType} />
-    </div>
+    {:else if activeTab === 'leaderboard'}
+      <div class="card">
+        <h2>🏆 Top Stations Leaderboard</h2>
+        <Statistics fuelType={selectedFuelType} hours={selectedHours} leaderboardOnly={true} />
+      </div>
+    {:else if activeTab === 'stations'}
+      <div class="card">
+        <h2>⛽ Current Prices at All Stations</h2>
+        <CurrentPrices fuelType={selectedFuelType} />
+      </div>
+    {/if}
   </div>
 </main>
 
@@ -139,6 +156,40 @@
     display: flex;
     gap: 0.5rem;
     align-items: center;
+  }
+
+  .tabs {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 2rem;
+    border-bottom: 2px solid #30363d;
+    padding-bottom: 0;
+  }
+
+  .tabs button {
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: #8b949e;
+    padding: 0.75rem 1.5rem;
+    border-radius: 0;
+    cursor: pointer;
+    font-weight: 500;
+    font-size: 1rem;
+    transition: all 0.2s;
+    margin-bottom: -2px;
+  }
+
+  .tabs button:hover {
+    background: transparent;
+    border-bottom-color: #58a6ff;
+    color: #c9d1d9;
+  }
+
+  .tabs button.active {
+    background: transparent;
+    border-bottom-color: #3b82f6;
+    color: #3b82f6;
   }
 
   label {

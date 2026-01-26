@@ -5,10 +5,12 @@
   
   let prices = []
   let loading = true
+  let displayCount = 20
+  let scrollContainer
   
   async function fetchPrices() {
     try {
-      const response = await fetch('http://localhost:8001/api/prices/current?limit=100')
+      const response = await fetch('http://localhost:8001/api/prices/current?limit=500')
       const data = await response.json()
       prices = data.sort((a, b) => {
         const priceA = a[fuelType] || Infinity
@@ -19,6 +21,17 @@
     } catch (error) {
       console.error('Error fetching prices:', error)
       loading = false
+    }
+  }
+  
+  function handleScroll() {
+    if (!scrollContainer) return
+    
+    const { scrollTop, scrollHeight, clientHeight } = scrollContainer
+    const scrolledToBottom = scrollTop + clientHeight >= scrollHeight - 100
+    
+    if (scrolledToBottom && displayCount < prices.length) {
+      displayCount += 20
     }
   }
   
@@ -34,6 +47,7 @@
       const priceB = b[fuelType] || Infinity
       return priceA - priceB
     })
+    displayCount = 20
   }
   
   function getPrice(station) {
@@ -41,14 +55,14 @@
   }
 </script>
 
-<div class="current-prices">
+<div class="current-prices" bind:this={scrollContainer} on:scroll={handleScroll}>
   {#if loading}
     <div class="loading">Loading stations...</div>
   {:else if prices.length === 0}
     <div class="no-data">No station data available yet.</div>
   {:else}
     <div class="price-list">
-      {#each prices.slice(0, 20) as station, index}
+      {#each prices.slice(0, displayCount) as station, index}
         {#if getPrice(station)}
           <div class="price-item" class:best={index === 0}>
             <div class="rank">#{index + 1}</div>
@@ -72,6 +86,9 @@
           </div>
         {/if}
       {/each}
+      {#if displayCount < prices.length}
+        <div class="load-more">Scroll for more... ({displayCount}/{prices.length})</div>
+      {/if}
     </div>
   {/if}
 </div>
@@ -80,6 +97,14 @@
   .current-prices {
     max-height: 600px;
     overflow-y: auto;
+  }
+  
+  .load-more {
+    text-align: center;
+    padding: 1rem;
+    color: #8b949e;
+    font-size: 0.9rem;
+    font-style: italic;
   }
   
   .price-list {
