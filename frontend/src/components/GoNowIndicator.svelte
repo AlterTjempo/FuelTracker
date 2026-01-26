@@ -1,4 +1,6 @@
 <script>
+  import API_BASE from '../lib/api.js'
+  
   export let fuelType = 'e5'
   
   let indicator = null
@@ -6,7 +8,7 @@
   
   async function fetchIndicator() {
     try {
-      const response = await fetch(`http://localhost:8001/api/prices/analytics/go-now?fuel_type=${fuelType}`)
+      const response = await fetch(`${API_BASE}/prices/analytics/go-now?fuel_type=${fuelType}`)
       indicator = await response.json()
       loading = false
     } catch (error) {

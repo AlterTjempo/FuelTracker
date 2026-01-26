@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte'
   import { Chart, registerables } from 'chart.js'
   import { format } from 'date-fns'
+  import API_BASE from '../lib/api.js'
   
   Chart.register(...registerables)
   
@@ -15,7 +16,7 @@
   
   async function fetchData() {
     try {
-      const response = await fetch(`http://localhost:8001/api/prices/history/all?fuel_type=${fuelType}&hours=${hours}`)
+      const response = await fetch(`${API_BASE}/prices/history/all?fuel_type=${fuelType}&hours=${hours}`)
       const result = await response.json()
       data = result
       updateChart()

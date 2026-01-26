@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte'
+  import API_BASE from '../lib/api.js'
   
   export let fuelType = 'e5'
   export let hours = 24
@@ -16,12 +17,12 @@
   
   async function fetchLowest() {
     try {
-      const response = await fetch(`http://localhost:8001/api/prices/lowest?fuel_type=${fuelType}&hours=${hours}&limit=5`)
+      const response = await fetch(`${API_BASE}/prices/lowest?fuel_type=${fuelType}&hours=${hours}&limit=5`)
       lowestPrices = await response.json()
       
       // Fetch full station details for the cheapest one
       if (lowestPrices.length > 0) {
-        const stationResponse = await fetch(`http://localhost:8001/api/stations/${lowestPrices[0].station_id}`)
+        const stationResponse = await fetch(`${API_BASE}/stations/${lowestPrices[0].station_id}`)
         const stationData = await stationResponse.json()
         stations = [stationData]
       }
