@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte'
+  import API_BASE from '../lib/api.js'
   
   export let fuelType = 'e5'
   
@@ -9,7 +10,7 @@
   
   async function fetchStations() {
     try {
-      const response = await fetch('http://localhost:8001/api/prices/current?limit=100')
+      const response = await fetch(`${API_BASE}/prices/current?limit=100`)
       const data = await response.json()
       stations = data.filter(s => s[fuelType] !== null && s.latitude && s.longitude)
       loading = false

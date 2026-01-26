@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings
 from typing import Optional
+from pathlib import Path
 
 
 class Settings(BaseSettings):
@@ -13,7 +14,7 @@ class Settings(BaseSettings):
     RANGE: float = 10.0  # km
     
     class Config:
-        env_file = "../config.env"
+        env_file = str(Path(__file__).resolve().parent.parent.parent / "config.env")
 
 
 settings = Settings()
