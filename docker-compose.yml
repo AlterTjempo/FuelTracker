@@ -2,8 +2,7 @@ services:
   db:
     image: postgres:16
     container_name: fuel_db
-    restart_policy:
-      condition: unless-stopped
+    restart: unless-stopped
     environment:
       POSTGRES_USER: fuel
       POSTGRES_PASSWORD: fuel
@@ -16,8 +15,7 @@ services:
   backend:
     build: ./backend
     container_name: fuel_api
-    restart_policy:
-      condition: unless-stopped
+    restart: unless-stopped
     depends_on:
       - db
     env_file:
@@ -32,8 +30,7 @@ services:
   frontend:
     build: ./frontend
     container_name: fuel_web
-    restart_policy:
-      condition: unless-stopped
+    restart: unless-stopped
     depends_on:
       - backend
     ports:
