@@ -71,7 +71,12 @@
         {/if}
         </div>
         <div class="info">
-          <div class="name">{item.station_name}</div>
+          <div class="name">
+            {item.station_name}
+            {#if !item.is_open}
+              <span class="status-closed">CLOSED</span>
+            {/if}
+          </div>
           {#if item.city}
             <div class="city">{item.city}</div>
           {/if}
@@ -124,6 +129,17 @@
     font-weight: 600;
     color: #e6edf3;
     margin-bottom: 0.25rem;
+  }
+  
+  .status-closed {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: #fff;
+    background: #ef4444;
+    padding: 0.2rem 0.5rem;
+    border-radius: 3px;
+    margin-left: 0.5rem;
   }
   
   .route-btn {

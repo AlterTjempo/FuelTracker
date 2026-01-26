@@ -53,7 +53,12 @@
           <div class="price-item" class:best={index === 0}>
             <div class="rank">#{index + 1}</div>
             <div class="station-info">
-              <div class="station-name">{station.station_name}</div>
+              <div class="station-name">
+                {station.station_name}
+                {#if !station.is_open}
+                  <span class="status-closed">CLOSED</span>
+                {/if}
+              </div>
               <div class="station-details">
                 {#if station.brand}
                   <span class="brand">{station.brand}</span>
@@ -134,6 +139,17 @@
   
   .brand {
     font-weight: 500;
+  }
+  
+  .status-closed {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: #fff;
+    background: #ef4444;
+    padding: 0.2rem 0.5rem;
+    border-radius: 3px;
+    margin-left: 0.5rem;
   }
   
   .price {

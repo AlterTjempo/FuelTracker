@@ -29,6 +29,7 @@ class CurrentPriceResponse(BaseModel):
     station_name: str
     brand: Optional[str]
     city: Optional[str]
+    is_open: bool
     e5: Optional[float]
     e10: Optional[float]
     diesel: Optional[float]
@@ -41,6 +42,7 @@ class LowestPriceResponse(BaseModel):
     station_id: str
     station_name: str
     city: Optional[str]
+    is_open: bool
     timestamp: datetime
 
 
@@ -83,6 +85,7 @@ def get_current_prices(
             station_name=station.name,
             brand=station.brand,
             city=station.city,
+            is_open=station.is_open,
             e5=price.e5,
             e10=price.e10,
             diesel=price.diesel,
@@ -110,6 +113,7 @@ def get_lowest_prices(
         FuelPrice.station_id,
         Station.name,
         Station.city,
+        Station.is_open,
         func.min(fuel_column).label('min_price'),
         func.max(FuelPrice.timestamp).label('latest_timestamp')
     ).join(Station, FuelPrice.station_id == Station.id).filter(
@@ -118,7 +122,8 @@ def get_lowest_prices(
     ).group_by(
         FuelPrice.station_id,
         Station.name,
-        Station.city
+        Station.city,
+        Station.is_open
     ).order_by(
         func.min(fuel_column)
     ).limit(limit)
@@ -126,13 +131,14 @@ def get_lowest_prices(
     results = query.all()
     
     response = []
-    for station_id, name, city, min_price, timestamp in results:
+    for station_id, name, city, is_open, min_price, timestamp in results:
         response.append(LowestPriceResponse(
             fuel_type=fuel_type,
             price=min_price,
             station_id=station_id,
             station_name=name,
             city=city,
+            is_open=is_open,
             timestamp=timestamp
         ))
     
