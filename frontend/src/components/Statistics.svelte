@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte'
+  import API_BASE from '../lib/api.js'
   
   export let fuelType = 'e5'
   export let hours = 24
@@ -17,7 +18,7 @@
     try {
       if (!leaderboardOnly) {
         // Fetch basic stats
-        const response = await fetch(`http://localhost:8001/api/prices/history/all?fuel_type=${fuelType}&hours=${hours}`)
+        const response = await fetch(`${API_BASE}/prices/history/all?fuel_type=${fuelType}&hours=${hours}`)
         const data = await response.json()
         
         if (data.length > 0) {
@@ -28,16 +29,16 @@
         }
         
         // Fetch time patterns
-        const patternsResponse = await fetch(`http://localhost:8001/api/prices/analytics/time-patterns?fuel_type=${fuelType}&hours=${hours}`)
+        const patternsResponse = await fetch(`${API_BASE}/prices/analytics/time-patterns?fuel_type=${fuelType}&hours=${hours}`)
         timePatterns = await patternsResponse.json()
         
         // Fetch lowest ever
-        const lowestResponse = await fetch(`http://localhost:8001/api/prices/analytics/lowest-ever?fuel_type=${fuelType}`)
+        const lowestResponse = await fetch(`${API_BASE}/prices/analytics/lowest-ever?fuel_type=${fuelType}`)
         lowestEver = await lowestResponse.json()
       }
       
       // Fetch top stations (always, for leaderboard)
-      const stationsResponse = await fetch(`http://localhost:8001/api/prices/analytics/top-stations?fuel_type=${fuelType}&hours=${hours}&limit=${leaderboardOnly ? 10 : 3}`)
+      const stationsResponse = await fetch(`${API_BASE}/prices/analytics/top-stations?fuel_type=${fuelType}&hours=${hours}&limit=${leaderboardOnly ? 10 : 3}`)
       topStations = await stationsResponse.json()
       
       loading = false
@@ -53,7 +54,7 @@
     return () => clearInterval(interval)
   })
   
-  $: if (fuelType || hours) {
+  $: if (fuelType || hours || leaderboardOnly) {
     fetchStats()
   }
   
