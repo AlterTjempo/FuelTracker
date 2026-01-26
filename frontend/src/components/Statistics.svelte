@@ -11,7 +11,7 @@
   
   async function fetchStats() {
     try {
-      const response = await fetch(`http://localhost:8000/api/prices/history/all?fuel_type=${fuelType}&hours=${hours}`)
+      const response = await fetch(`http://localhost:8001/api/prices/history/all?fuel_type=${fuelType}&hours=${hours}`)
       const data = await response.json()
       
       if (data.length > 0) {

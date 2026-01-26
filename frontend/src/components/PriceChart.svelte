@@ -15,7 +15,7 @@
   
   async function fetchData() {
     try {
-      const response = await fetch(`http://localhost:8000/api/prices/history/all?fuel_type=${fuelType}&hours=${hours}`)
+      const response = await fetch(`http://localhost:8001/api/prices/history/all?fuel_type=${fuelType}&hours=${hours}`)
       const result = await response.json()
       data = result
       updateChart()

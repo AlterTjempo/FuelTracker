@@ -8,7 +8,7 @@
   
   async function fetchPrices() {
     try {
-      const response = await fetch('http://localhost:8000/api/prices/current?limit=100')
+      const response = await fetch('http://localhost:8001/api/prices/current?limit=100')
       const data = await response.json()
       prices = data.sort((a, b) => {
         const priceA = a[fuelType] || Infinity

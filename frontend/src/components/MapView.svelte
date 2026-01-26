@@ -9,7 +9,7 @@
   
   async function fetchStations() {
     try {
-      const response = await fetch('http://localhost:8000/api/prices/current?limit=100')
+      const response = await fetch('http://localhost:8001/api/prices/current?limit=100')
       const data = await response.json()
       stations = data.filter(s => s[fuelType] !== null && s.latitude && s.longitude)
       loading = false
