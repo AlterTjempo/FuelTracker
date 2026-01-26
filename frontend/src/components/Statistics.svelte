@@ -76,14 +76,17 @@
   
   function formatDate(timestamp) {
     const date = new Date(timestamp)
-    return date.toLocaleString('en-US', { 
-      year: 'numeric', 
-      month: '2-digit', 
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      timeZoneName: 'short'
-    })
+    // Convert to UTC+1 by adding 1 hour to UTC time
+    const utcTime = new Date(date.getTime() + date.getTimezoneOffset() * 60 * 1000)
+    const localTime = new Date(utcTime.getTime() + 1 * 60 * 60 * 1000)
+    
+    const day = String(localTime.getDate()).padStart(2, '0')
+    const month = String(localTime.getMonth() + 1).padStart(2, '0')
+    const year = localTime.getFullYear()
+    const hours = String(localTime.getHours()).padStart(2, '0')
+    const minutes = String(localTime.getMinutes()).padStart(2, '0')
+    
+    return `${day}/${month}/${year}, ${hours}:${minutes}`
   }
 </script>
 
