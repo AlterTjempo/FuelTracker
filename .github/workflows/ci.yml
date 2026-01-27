@@ -97,8 +97,8 @@ jobs:
       - name: Create test config
         run: |
           cp config.env.example config.env
-          # Add dummy values for testing
-          echo "TANKERKONIG_API_KEY=test-key-12345" >> config.env
+          # Replace the API key placeholder with a test value
+          sed -i 's/TANKERKONIG_API_KEY=your-api-key-here/TANKERKONIG_API_KEY=test-key-12345/' config.env
       
       # Validate docker-compose.yml syntax
       - name: Validate Docker Compose
