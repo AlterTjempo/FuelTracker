@@ -1,16 +1,15 @@
 # FuelTracker
 
-A fuel price tracking and analysis platform using the Tankerkonig API.
+A hobby project to track fuel prices in your area. Gets data from the Tankerkonig API and shows you where to find the cheapest gas.
 
 ## Features
 
 - 📊 Real-time fuel price tracking
-- 📈 Historical price graphs and trends (24h, 3d, 7d, 1m, All time)
-- 🏆 Lowest price finder with Google Maps routing
-- 🗺️ Interactive station map with color-coded prices
-- 🔍 Station comparison
-- ⏰ Automatic data collection every hour
-- 💾 Persistent historical data (never deleted)
+- 📈 Historical price graphs and trends (24h, 3d, 7d, 1m, all time)
+- 🏆 Find the cheapest fuel with directions
+- 🗺️ Interactive map showing gas stations with prices
+- ⏰ Updates every 15 minutes automatically.
+- 💾 Keeps all historical data for analysis
 
 ## Setup
 
@@ -23,11 +22,12 @@ A fuel price tracking and analysis platform using the Tankerkonig API.
 
 1. Copy the example config and add your API key:
    ```bash
-   # Edit config.env and add your API key
+   cp config.env.example config.env
+   # Edit config.env and add your Tankerkonig API key
    TANKERKONIG_API_KEY=your_api_key_here
    ```
 
-2. Optional: Configure your location in `config.env`:
+2. Optional: Set your location to track nearby stations:
    ```env
    LATITUDE=52.52        # Your latitude
    LONGITUDE=13.405      # Your longitude
@@ -37,68 +37,49 @@ A fuel price tracking and analysis platform using the Tankerkonig API.
 ### Running
 
 ```bash
-# Start all services
+# Start everything with Docker
 docker-compose up --build
 
-# The API will be available at:
-# http://localhost:8000
-# API docs at: http://localhost:8000/docs
+# API will be at http://localhost:8001
+# Docs at http://localhost:8001/docs
 ```
 
 ## API Endpoints
 
 ### Stations
-
 - `GET /api/stations/` - List all stations
-- `GET /api/stations/{station_id}` - Get station details
+- `GET /api/stations/{station_id}` - Get details for a station
 
 ### Prices
-
-- `GET /api/prices/current` - Current prices for all stations
-- `GET /api/prices/lowest?fuel_type=diesel&hours=24` - Lowest prices
-- `GET /api/prices/station/{station_id}/history?hours=24` - Price history for a station
-- `GET /api/prices/station/{station_id}/stats` - Price statistics
-- `GET /api/prices/history/all?fuel_type=diesel&hours=24` - Average prices for graphing
+- `GET /api/prices/current` - Current prices
+- `GET /api/prices/lowest?fuel_type=diesel&hours=24` - Cheapest fuel
+- `GET /api/prices/station/{station_id}/history?hours=24` - Price history
+- `GET /api/prices/station/{station_id}/stats` - Price stats
+- `GET /api/prices/history/all?fuel_type=diesel&hours=24` - Average prices for charts
 
 ## Data Collection
 
-The backend automatically collects data every hour from the Tankerkonig API.
-All data is stored permanently in PostgreSQL with complete history for long-term analysis and graphing.
-**No data is ever deleted** - you'll have a complete historical record of all price changes.
+The backend fetches fresh data from Tankerkonig every 15 minutes and stores it in PostgreSQL. All historical data is kept, so you can track how prices change over time.
 
-## Database Connection (DBeaver)
+## Database
 
-To connect to the PostgreSQL database using DBeaver:
+PostgreSQL stores the fuel prices and station data. Two main tables:
+- `stations` - Gas station info (name, brand, location, etc.)
+- `fuel_prices` - Price history (timestamp, station_id, e5, e10, diesel)
 
-1. **Open DBeaver** and create a new database connection (Database → New Database Connection)
-2. **Select PostgreSQL** from the database list
-3. **Enter connection details:**
-   - **Host:** `localhost`
-   - **Port:** `5432`
-   - **Database:** `fuelprices`
-   - **Username:** `fuel`
-   - **Password:** `fuel`
-4. **Test Connection** and click **Finish**
-
-### Database Schema
-
-**Tables:**
-- `stations` - Gas station information (id, name, brand, location, etc.)
-- `fuel_prices` - Historical price records (timestamp, station_id, e5, e10, diesel)
-
-**Example Queries:**
+Example queries:
 ```sql
--- View all stations
+-- All stations
 SELECT * FROM stations;
 
--- Get latest prices
+-- Latest prices
 SELECT s.name, s.city, fp.e5, fp.e10, fp.diesel, fp.timestamp
 FROM fuel_prices fp
 JOIN stations s ON fp.station_id = s.id
 ORDER BY fp.timestamp DESC
 LIMIT 20;
 
--- Find cheapest diesel prices
+-- Cheapest diesel
 SELECT s.name, s.city, MIN(fp.diesel) as min_price
 FROM fuel_prices fp
 JOIN stations s ON fp.station_id = s.id
@@ -110,15 +91,15 @@ LIMIT 10;
 
 ## Tech Stack
 
-- **Backend**: FastAPI (Python)
-- **Database**: PostgreSQL
-- **Scheduler**: APScheduler
-- **Frontend**: Svelte (to be implemented)
+- FastAPI (Python backend)
+- PostgreSQL (database)
+- APScheduler (15-minute data collection)
+- Svelte (frontend)
+- Tankerkonig API (fuel price data)
 
 ## Next Steps
 
-1. ✅ Data collection setup (DONE)
-2. 🔲 Frontend development (Svelte)
-3. 🔲 Advanced analytics and graphs
-4. 🔲 ML-based price predictions
-5. 🔲 Optimal refueling time recommendations
+- [ ] Frontend improvements
+- [ ] Better graphs and analytics
+- [ ] Mobile app maybe?
+- [ ] Simple machine learning (because everything needs AI...)
