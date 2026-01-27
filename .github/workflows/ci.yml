@@ -1,0 +1,111 @@
+name: CI - Build and Check
+
+# This workflow runs automatically when you push code or create a pull request
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+
+jobs:
+  # Job 1: Check the backend (Python/FastAPI)
+  backend-check:
+    name: Backend Build & Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      # Download your code from the repository
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      # Set up Python environment
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      
+      # Install Python dependencies
+      - name: Install dependencies
+        working-directory: ./backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          # Install development tools for code quality checks
+          pip install flake8 black
+      
+      # Check code formatting with Black
+      - name: Check code formatting
+        working-directory: ./backend
+        run: black --check app/ || true
+      
+      # Lint Python code for errors
+      - name: Lint with flake8
+        working-directory: ./backend
+        run: |
+          # Check for syntax errors and undefined names
+          flake8 app/ --count --select=E9,F63,F7,F82 --show-source --statistics || true
+          # Check for style issues (but don't fail the build)
+          flake8 app/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics || true
+      
+      # Build Docker image to ensure it works
+      - name: Build Docker image
+        working-directory: ./backend
+        run: docker build -t fueltracker-backend:test .
+
+  # Job 2: Check the frontend (Node/Svelte)
+  frontend-check:
+    name: Frontend Build & Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      # Download your code from the repository
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      # Set up Node.js environment
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      
+      # Install Node.js dependencies
+      - name: Install dependencies
+        working-directory: ./frontend
+        run: npm ci
+      
+      # Build the Svelte application
+      - name: Build frontend
+        working-directory: ./frontend
+        run: npm run build
+      
+      # Build Docker image to ensure it works
+      - name: Build Docker image
+        working-directory: ./frontend
+        run: docker build -t fueltracker-frontend:test .
+
+  # Job 3: Test Docker Compose setup
+  docker-compose-check:
+    name: Docker Compose Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      # Download your code from the repository
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      # Create a dummy config.env file for testing
+      - name: Create test config
+        run: |
+          cp config.env.example config.env
+          # Add dummy values for testing
+          echo "TANKERKOENIG_API_KEY=test-key-12345" >> config.env
+      
+      # Validate docker-compose.yml syntax
+      - name: Validate Docker Compose
+        run: docker compose config > /dev/null
+      
+      # Build all services to ensure they work together
+      - name: Build Docker Compose services
+        run: docker compose build
