@@ -24,7 +24,7 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(
         collector.fetch_and_store_prices,
         'interval',
-        hours=1,
+        minutes=30,
         id='fetch_prices'
     )
     
