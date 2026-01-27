@@ -8,7 +8,7 @@ A hobby project to track fuel prices in your area. Gets data from the Tankerkoni
 - 📈 Historical price graphs and trends (24h, 3d, 7d, 1m, all time)
 - 🏆 Find the cheapest fuel with directions
 - 🗺️ Interactive map showing gas stations with prices
-- ⏰ Updates every hour automatically
+- ⏰ Updates every 15 minutes automatically.
 - 💾 Keeps all historical data for analysis
 
 ## Setup
@@ -59,7 +59,7 @@ docker-compose up --build
 
 ## Data Collection
 
-The backend fetches fresh data from Tankerkonig every hour and stores it in PostgreSQL. All historical data is kept, so you can track how prices change over time.
+The backend fetches fresh data from Tankerkonig every 15 minutes and stores it in PostgreSQL. All historical data is kept, so you can track how prices change over time.
 
 ## Database
 
@@ -93,7 +93,7 @@ LIMIT 10;
 
 - FastAPI (Python backend)
 - PostgreSQL (database)
-- APScheduler (bi-hourly data collection)
+- APScheduler (15-minute data collection)
 - Svelte (frontend)
 - Tankerkonig API (fuel price data)
 

@@ -20,11 +20,11 @@ async def lifespan(app: FastAPI):
     # Initialize data collector
     collector = DataCollector()
     
-    # Fetch data every hour as requested
+    # Fetch data every 15 minutes
     scheduler.add_job(
         collector.fetch_and_store_prices,
         'interval',
-        minutes=30,
+        minutes=15,
         id='fetch_prices'
     )
     
