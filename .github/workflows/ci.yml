@@ -36,16 +36,16 @@ jobs:
       # Check code formatting with Black
       - name: Check code formatting
         working-directory: ./backend
-        run: black --check app/ || true
+        run: black --check app/
       
       # Lint Python code for errors
       - name: Lint with flake8
         working-directory: ./backend
         run: |
           # Check for syntax errors and undefined names
-          flake8 app/ --count --select=E9,F63,F7,F82 --show-source --statistics || true
+          flake8 app/ --count --select=E9,F63,F7,F82 --show-source --statistics
           # Check for style issues (but don't fail the build)
-          flake8 app/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics || true
+          flake8 app/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
       
       # Build Docker image to ensure it works
       - name: Build Docker image
@@ -98,7 +98,7 @@ jobs:
         run: |
           cp config.env.example config.env
           # Add dummy values for testing
-          echo "TANKERKOENIG_API_KEY=test-key-12345" >> config.env
+          echo "TANKERKONIG_API_KEY=test-key-12345" >> config.env
       
       # Validate docker-compose.yml syntax
       - name: Validate Docker Compose
