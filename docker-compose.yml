@@ -38,6 +38,7 @@ services:
     volumes:
       - ./frontend/src:/app/src
       - ./frontend/index.html:/app/index.html
+      - ./frontend/fuel.svg:/app/fuel.svg
       - /app/node_modules
 
 volumes:
