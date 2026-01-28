@@ -103,6 +103,67 @@ def get_current_prices(
     return response
 
 
+@router.get("/current-lowest", response_model=List[LowestPriceResponse])
+def get_current_lowest_prices(
+    fuel_type: str = Query("diesel", regex="^(e5|e10|diesel)$"),
+    limit: int = Query(5, ge=1, le=20),
+    db: Session = Depends(get_db),
+):
+    """Get the current lowest fuel prices (from the latest data available for each station)"""
+    # Get the fuel type column
+    fuel_column = getattr(FuelPrice, fuel_type)
+
+    # Subquery to get the latest timestamp for each station
+    subquery = (
+        db.query(
+            FuelPrice.station_id, func.max(FuelPrice.timestamp).label("max_timestamp")
+        )
+        .group_by(FuelPrice.station_id)
+        .subquery()
+    )
+
+    # Query for current lowest prices
+    query = (
+        db.query(
+            FuelPrice.station_id,
+            Station.name,
+            Station.city,
+            Station.is_open,
+            fuel_column.label("current_price"),
+            FuelPrice.timestamp,
+        )
+        .join(
+            subquery,
+            and_(
+                FuelPrice.station_id == subquery.c.station_id,
+                FuelPrice.timestamp == subquery.c.max_timestamp,
+            ),
+        )
+        .join(Station, FuelPrice.station_id == Station.id)
+        .filter(fuel_column.isnot(None))
+        .order_by(fuel_column)
+        .limit(limit)
+    )
+
+    results = query.all()
+
+    response = []
+    for station_id, name, city, is_open, current_price, timestamp in results:
+        response.append(
+            LowestPriceResponse(
+                fuel_type=fuel_type,
+                price=current_price,
+                station_id=station_id,
+                station_name=name,
+                city=city,
+                is_open=is_open,
+                timestamp=timestamp,
+            )
+        )
+
+    return response
+
+
 @router.get("/lowest", response_model=List[LowestPriceResponse])
 def get_lowest_prices(
     fuel_type: str = Query("diesel", regex="^(e5|e10|diesel)$"),

@@ -59,17 +59,6 @@
           {:else if index === 2}🥉
           {:else}#{index + 1}
           {/if}
-        {#if index === 0}
-          <a 
-            href={getGoogleMapsUrl(item)} 
-            target="_blank" 
-            rel="noopener noreferrer"
-            class="route-btn"
-            title="Get directions"
-          >
-            🧭 Route
-          </a>
-        {/if}
         </div>
         <div class="info">
           <div class="name">

@@ -2,6 +2,7 @@
   import PriceChart from './components/PriceChart.svelte'
   import CurrentPrices from './components/CurrentPrices.svelte'
   import LowestPrices from './components/LowestPrices.svelte'
+  import CurrentLowestPrices from './components/CurrentLowestPrices.svelte'
   import Statistics from './components/Statistics.svelte'
   import GoNowIndicator from './components/GoNowIndicator.svelte'
   
@@ -82,6 +83,11 @@
         <PriceChart fuelType={selectedFuelType} hours={selectedHours} />
       </div>
 
+      <div class="card">
+        <h2>Best Prices Now</h2>
+        <CurrentLowestPrices fuelType={selectedFuelType} />
+      </div>
+
       <div class="grid">
         <div class="card">
           <h2>📊 Statistics</h2>
@@ -89,7 +95,7 @@
         </div>
         
         <div class="card">
-          <h2>🏆 Lowest Prices</h2>
+          <h2>🏆 Lowest Prices Ever</h2>
           <LowestPrices fuelType={selectedFuelType} hours={selectedHours} />
         </div>
       </div>
