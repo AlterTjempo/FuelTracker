@@ -25,6 +25,8 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: 'backend/requirements.txt'
       
       # Install Python dependencies
       - name: Install dependencies
@@ -33,7 +35,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           # Install development tools for code quality checks
-          pip install flake8 black
+          pip install flake8 black pytest pytest-asyncio httpx
       
       # Check code formatting with Black
       - name: Check code formatting
@@ -48,6 +50,18 @@ jobs:
           flake8 app/ --count --select=E9,F63,F7,F82 --show-source --statistics
           # Check for style issues (but don't fail the build)
           flake8 app/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+      
+      # Run tests with pytest
+      - name: Run tests
+        working-directory: ./backend
+        run: |
+          # Run pytest with coverage if tests exist
+          if [ -d "tests" ] || find app -name "test_*.py" -o -name "*_test.py" | grep -q .; then
+            pytest -v
+          else
+            echo "No tests found - skipping test execution"
+            echo "Note: Add tests in a 'tests' directory or with test_*.py naming"
+          fi
       
       # Build Docker image to ensure it works
       - name: Build Docker image
@@ -71,6 +85,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: 'frontend/package.json'
       
       # Install Node.js dependencies
       - name: Install dependencies
@@ -87,9 +103,9 @@ jobs:
         working-directory: ./frontend
         run: docker build -t fueltracker-frontend:test .
 
-  # Job 3: Test Docker Compose setup
+  # Job 3: Validate Docker Compose configuration
   docker-compose-check:
-    name: Docker Compose Check
+    name: Docker Compose Validation
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -107,9 +123,5 @@ jobs:
           sed -i 's/TANKERKONIG_API_KEY=your-api-key-here/TANKERKONIG_API_KEY=test-key-12345/' config.env
       
       # Validate docker-compose.yml syntax
-      - name: Validate Docker Compose
+      - name: Validate Docker Compose configuration
         run: docker compose config > /dev/null
-      
-      # Build all services to ensure they work together
-      - name: Build Docker Compose services
-        run: docker compose build
