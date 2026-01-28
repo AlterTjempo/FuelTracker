@@ -6,7 +6,13 @@ export default defineConfig({
     server: {
         host: '0.0.0.0',
         port: 5173,
-        allowedHosts: ['tjempo.nl', 'localhost'],
+        allowedHosts: [
+            'tjempo.nl', 
+            'www.tjempo.nl', 
+            '0.0.0.0', // IPv4 wildcard
+            '::', // IPv6 wildcard
+            'localhost',
+        ],
         watch: {
             usePolling: true
         },
