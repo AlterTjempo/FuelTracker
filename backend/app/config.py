@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings
-from typing import Optional
+from typing import Optional, List
 from pathlib import Path
 
 
@@ -12,6 +12,16 @@ class Settings(BaseSettings):
     LATITUDE: float = 52.52
     LONGITUDE: float = 13.405
     RANGE: float = 10.0  # km
+
+    # CORS Settings
+    ALLOWED_ORIGINS: str = "*"
+
+    @property
+    def get_allowed_origins(self) -> List[str]:
+        """Parse comma-separated origins into a list"""
+        if self.ALLOWED_ORIGINS == "*":
+            return ["*"]
+        return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",")]
 
     class Config:
         env_file = str(Path(__file__).resolve().parent.parent.parent / "config.env")
