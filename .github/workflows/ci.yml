@@ -55,9 +55,9 @@ jobs:
       - name: Run tests
         working-directory: ./backend
         run: |
-          # Run pytest with coverage if tests exist
-          if [ -d "tests" ] || find app -name "test_*.py" -o -name "*_test.py" | grep -q .; then
-            pytest -v
+          # Run pytest - it will auto-discover tests in tests/ directory or test_*.py files
+          if [ -d "tests" ] || find . -name "test_*.py" -o -name "*_test.py" | grep -q .; then
+            pytest -v --tb=short
           else
             echo "No tests found - skipping test execution"
             echo "Note: Add tests in a 'tests' directory or with test_*.py naming"
