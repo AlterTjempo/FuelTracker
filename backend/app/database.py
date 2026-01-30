@@ -6,8 +6,7 @@ from config import settings
 
 # Configure engine to return timezone-aware datetimes
 engine = create_engine(
-    settings.DATABASE_URL,
-    connect_args={"options": "-c timezone=utc"}
+    settings.DATABASE_URL, connect_args={"options": "-c timezone=utc"}
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

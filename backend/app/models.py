@@ -19,8 +19,14 @@ class Station(Base):
     latitude = Column(Float, nullable=False)
     longitude = Column(Float, nullable=False)
     is_open = Column(Boolean, default=True)
-    first_seen = Column(TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc))
-    last_updated = Column(TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    first_seen = Column(
+        TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    last_updated = Column(
+        TIMESTAMP(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
     # Relationships
     prices = relationship("FuelPrice", back_populates="station")
@@ -33,7 +39,11 @@ class FuelPrice(Base):
 
     id = Column(String, primary_key=True)  # Will be generated as UUID
     station_id = Column(String, ForeignKey("stations.id"), nullable=False)
-    timestamp = Column(TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    timestamp = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
 
     # Fuel types (in EUR)
     e5 = Column(Float, nullable=True)
