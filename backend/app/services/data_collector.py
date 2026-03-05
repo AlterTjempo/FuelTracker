@@ -1,6 +1,6 @@
 import httpx
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session
 
@@ -105,7 +105,7 @@ class DataCollector:
                 existing_station.is_open = station_data.get(
                     "isOpen", existing_station.is_open
                 )
-                existing_station.last_updated = datetime.utcnow()
+                existing_station.last_updated = datetime.now(timezone.utc)
             else:
                 # Create new station
                 new_station = Station(
@@ -126,7 +126,7 @@ class DataCollector:
 
     def save_prices(self, prices_data: Dict[str, Dict], db: Session):
         """Save fuel prices to database"""
-        timestamp = datetime.utcnow()
+        timestamp = datetime.now(timezone.utc)
 
         for station_id, price_info in prices_data.items():
             # Only save if station exists and has price data
@@ -156,7 +156,7 @@ class DataCollector:
 
     async def fetch_and_store_prices(self):
         """Main function to fetch and store fuel prices"""
-        print(f"[{datetime.utcnow()}] Starting data collection...")
+        print(f"[{datetime.now(timezone.utc)}] Starting data collection...")
         print(
             f"Config - API Key: {'***' + self.api_key[-4:] if self.api_key else 'MISSING'}"
         )

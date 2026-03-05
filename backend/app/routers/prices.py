@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, and_
 from typing import List, Optional
 from pydantic import BaseModel
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from database import get_db
 from models import FuelPrice, Station
@@ -172,7 +172,7 @@ def get_lowest_prices(
     db: Session = Depends(get_db),
 ):
     """Get the lowest fuel prices in the specified timeframe"""
-    since = datetime.utcnow() - timedelta(hours=hours)
+    since = datetime.now(timezone.utc) - timedelta(hours=hours)
 
     # Get the fuel type column
     fuel_column = getattr(FuelPrice, fuel_type)
@@ -220,7 +220,7 @@ def get_station_price_history(
     db: Session = Depends(get_db),
 ):
     """Get price history for a specific station"""
-    since = datetime.utcnow() - timedelta(hours=hours)
+    since = datetime.now(timezone.utc) - timedelta(hours=hours)
 
     prices = (
         db.query(FuelPrice)
@@ -244,7 +244,7 @@ def get_station_stats(
     db: Session = Depends(get_db),
 ):
     """Get price statistics for a station"""
-    since = datetime.utcnow() - timedelta(hours=hours)
+    since = datetime.now(timezone.utc) - timedelta(hours=hours)
 
     stats = []
 
@@ -294,7 +294,7 @@ def get_all_prices_history(
     db: Session = Depends(get_db),
 ):
     """Get average price history across all stations for graphing"""
-    since = datetime.utcnow() - timedelta(hours=hours)
+    since = datetime.now(timezone.utc) - timedelta(hours=hours)
     fuel_column = getattr(FuelPrice, fuel_type)
 
     # Group by hourly intervals
@@ -331,7 +331,7 @@ def get_time_patterns(
     db: Session = Depends(get_db),
 ):
     """Get cheapest day and time patterns"""
-    since = datetime.utcnow() - timedelta(hours=hours)
+    since = datetime.now(timezone.utc) - timedelta(hours=hours)
     fuel_column = getattr(FuelPrice, fuel_type)
 
     # Check if we have enough data (at least 7 unique days for day patterns)
@@ -419,7 +419,7 @@ def get_go_now_indicator(
     fuel_column = getattr(FuelPrice, fuel_type)
 
     # Get current average (last hour)
-    one_hour_ago = datetime.utcnow() - timedelta(hours=1)
+    one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
     current_avg = (
         db.query(func.avg(fuel_column))
         .filter(FuelPrice.timestamp >= one_hour_ago, fuel_column.isnot(None))
@@ -427,7 +427,7 @@ def get_go_now_indicator(
     )
 
     # Get 24h average
-    one_day_ago = datetime.utcnow() - timedelta(hours=24)
+    one_day_ago = datetime.now(timezone.utc) - timedelta(hours=24)
     day_avg = (
         db.query(func.avg(fuel_column))
         .filter(FuelPrice.timestamp >= one_day_ago, fuel_column.isnot(None))
@@ -477,7 +477,7 @@ def get_top_stations(
     db: Session = Depends(get_db),
 ):
     """Get top stations by average price and consistency"""
-    since = datetime.utcnow() - timedelta(hours=hours)
+    since = datetime.now(timezone.utc) - timedelta(hours=hours)
     fuel_column = getattr(FuelPrice, fuel_type)
 
     # Get station statistics

@@ -4,7 +4,10 @@ from sqlalchemy.orm import sessionmaker
 
 from config import settings
 
-engine = create_engine(settings.DATABASE_URL)
+# Configure engine to return timezone-aware datetimes
+engine = create_engine(
+    settings.DATABASE_URL, connect_args={"options": "-c timezone=utc"}
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()

@@ -28,8 +28,8 @@
           maxPrice = Math.max(...data.map(d => d.max_price).filter(p => p !== null))
         }
         
-        // Fetch time patterns
-        const patternsResponse = await fetch(`${API_BASE}/prices/analytics/time-patterns?fuel_type=${fuelType}&hours=${hours}`)
+        // Fetch time patterns (always use 168 hours = 7 days for pattern analysis)
+        const patternsResponse = await fetch(`${API_BASE}/prices/analytics/time-patterns?fuel_type=${fuelType}&hours=168`)
         timePatterns = await patternsResponse.json()
         
         // Fetch lowest ever
@@ -222,7 +222,7 @@
         
         {#if topStations.length > 1}
           <div class="insight">
-            💡 <strong>{topStations[0].name}</strong> is cheapest {topStations[0].cheapest_percentage}% of the time
+            💡 <strong>{topStations[0].name}</strong> ({topStations[0].city || topStations[0].brand}) is cheapest {topStations[0].cheapest_percentage}% of the time
             {#if topStations[1].min_price < topStations[0].min_price}
               , but <strong>{topStations[1].name}</strong> dips lower (€{topStations[1].min_price} vs €{topStations[0].min_price})
             {/if}
