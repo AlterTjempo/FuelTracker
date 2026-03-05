@@ -10,11 +10,20 @@
   let selectedHours = 24
   let activeTab = 'overview'
   
+  // Calculate YTD hours (from Jan 1 of current year to now)
+  function getYTDHours() {
+    const now = new Date()
+    const startOfYear = new Date(now.getFullYear(), 0, 1)
+    const diffMs = now - startOfYear
+    return Math.floor(diffMs / (1000 * 60 * 60))
+  }
+  
   const timeRanges = [
     { label: '24h', hours: 24 },
     { label: '3d', hours: 72 },
     { label: '7d', hours: 168 },
     { label: '1m', hours: 720 },
+    { label: 'YTD', hours: getYTDHours() },
     { label: 'All', hours: 999999 }
   ]
 </script>
@@ -114,24 +123,30 @@
 </main>
 
 <style>
+  :global(*) {
+    box-sizing: border-box;
+  }
+
   :global(body) {
     margin: 0;
     padding: 0;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
     background: #0f1419;
     color: #e6edf3;
+    -webkit-text-size-adjust: 100%;
+    overflow-x: hidden;
   }
 
   header {
     background: linear-gradient(135deg, #1f2937 0%, #111827 100%);
     border-bottom: 1px solid #30363d;
-    padding: 2rem 0;
-    margin-bottom: 2rem;
+    padding: 1.25rem 0;
+    margin-bottom: 1rem;
   }
 
   h1 {
     margin: 0;
-    font-size: 2.5rem;
+    font-size: 1.75rem;
     font-weight: 700;
     background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
     -webkit-background-clip: text;
@@ -140,36 +155,44 @@
   }
 
   .subtitle {
-    margin: 0.5rem 0 0 0;
+    margin: 0.25rem 0 0 0;
     color: #8b949e;
-    font-size: 1.1rem;
+    font-size: 0.9rem;
   }
 
   .container {
     max-width: 1400px;
     margin: 0 auto;
-    padding: 0 2rem;
+    padding: 0 0.75rem;
   }
 
   .controls {
     display: flex;
-    gap: 2rem;
-    margin-bottom: 2rem;
-    flex-wrap: wrap;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
   }
 
   .fuel-selector, .time-selector {
     display: flex;
-    gap: 0.5rem;
+    gap: 0.375rem;
     align-items: center;
+    flex-wrap: wrap;
   }
 
   .tabs {
     display: flex;
-    gap: 0.5rem;
-    margin-bottom: 2rem;
+    gap: 0;
+    margin-bottom: 1rem;
     border-bottom: 2px solid #30363d;
     padding-bottom: 0;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .tabs::-webkit-scrollbar {
+    display: none;
   }
 
   .tabs button {
@@ -177,13 +200,15 @@
     border: none;
     border-bottom: 2px solid transparent;
     color: #8b949e;
-    padding: 0.75rem 1.5rem;
+    padding: 0.625rem 0.875rem;
     border-radius: 0;
     cursor: pointer;
     font-weight: 500;
-    font-size: 1rem;
+    font-size: 0.875rem;
     transition: all 0.2s;
     margin-bottom: -2px;
+    white-space: nowrap;
+    flex-shrink: 0;
   }
 
   .tabs button:hover {
@@ -201,18 +226,23 @@
   label {
     font-weight: 600;
     color: #8b949e;
-    margin-right: 0.5rem;
+    margin-right: 0.25rem;
+    font-size: 0.85rem;
+    white-space: nowrap;
   }
 
   button {
     background: #21262d;
     border: 1px solid #30363d;
     color: #8b949e;
-    padding: 0.5rem 1rem;
+    padding: 0.5rem 0.75rem;
     border-radius: 6px;
     cursor: pointer;
     font-weight: 500;
+    font-size: 0.85rem;
     transition: all 0.2s;
+    min-height: 2.5rem;
+    touch-action: manipulation;
   }
 
   button:hover {
@@ -230,28 +260,137 @@
     background: #161b22;
     border: 1px solid #30363d;
     border-radius: 8px;
-    padding: 1.5rem;
-    margin-bottom: 2rem;
+    padding: 0.75rem;
+    margin-bottom: 1rem;
   }
 
   .grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-    gap: 1.5rem;
-    margin-bottom: 2rem;
+    grid-template-columns: 1fr;
+    gap: 1rem;
+    margin-bottom: 1rem;
   }
 
   .card {
     background: #161b22;
     border: 1px solid #30363d;
     border-radius: 8px;
-    padding: 1.5rem;
-    margin-bottom: 2rem;
+    padding: 1rem;
+    margin-bottom: 1rem;
   }
 
   h2 {
-    margin: 0 0 1rem 0;
-    font-size: 1.3rem;
+    margin: 0 0 0.75rem 0;
+    font-size: 1.1rem;
     color: #e6edf3;
+  }
+
+  /* Tablet and up */
+  @media (min-width: 640px) {
+    header {
+      padding: 1.5rem 0;
+      margin-bottom: 1.5rem;
+    }
+
+    h1 {
+      font-size: 2rem;
+    }
+
+    .subtitle {
+      font-size: 1rem;
+    }
+
+    .container {
+      padding: 0 1.25rem;
+    }
+
+    .controls {
+      flex-direction: row;
+      gap: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .fuel-selector, .time-selector {
+      gap: 0.5rem;
+    }
+
+    .tabs button {
+      padding: 0.75rem 1.25rem;
+      font-size: 0.95rem;
+    }
+
+    label {
+      font-size: 0.9rem;
+      margin-right: 0.5rem;
+    }
+
+    button {
+      padding: 0.5rem 1rem;
+      font-size: 0.9rem;
+    }
+
+    .main-chart {
+      padding: 1.25rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .card {
+      padding: 1.25rem;
+      margin-bottom: 1.5rem;
+    }
+
+    h2 {
+      font-size: 1.2rem;
+    }
+  }
+
+  /* Desktop */
+  @media (min-width: 1024px) {
+    header {
+      padding: 2rem 0;
+      margin-bottom: 2rem;
+    }
+
+    h1 {
+      font-size: 2.5rem;
+    }
+
+    .subtitle {
+      font-size: 1.1rem;
+    }
+
+    .container {
+      padding: 0 2rem;
+    }
+
+    .controls {
+      gap: 2rem;
+      margin-bottom: 2rem;
+    }
+
+    .tabs button {
+      padding: 0.75rem 1.5rem;
+      font-size: 1rem;
+    }
+
+    .main-chart {
+      padding: 1.5rem;
+      margin-bottom: 2rem;
+    }
+
+    .grid {
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 1.5rem;
+      margin-bottom: 2rem;
+    }
+
+    .card {
+      padding: 1.5rem;
+      margin-bottom: 2rem;
+    }
+
+    h2 {
+      font-size: 1.3rem;
+    }
   }
 </style>

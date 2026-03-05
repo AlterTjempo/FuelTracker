@@ -16,13 +16,17 @@
   
   async function fetchData() {
     try {
+      loading = true
       const response = await fetch(`${API_BASE}/prices/history/all?fuel_type=${fuelType}&hours=${hours}`)
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status} ${response.statusText}`)
+      }
       const result = await response.json()
       data = result
-      updateChart()
       loading = false
     } catch (error) {
       console.error('Error fetching data:', error)
+      data = []
       loading = false
     }
   }
@@ -154,6 +158,15 @@
   $: if (fuelType || hours) {
     fetchData()
   }
+  
+  // Reactive statement to update chart when canvas or data changes,
+  // and destroy it when data becomes empty or canvas is unmounted
+  $: if (chartCanvas && data.length > 0) {
+    updateChart()
+  } else if (chart) {
+    chart.destroy()
+    chart = null
+  }
 </script>
 
 <div class="chart-container">
@@ -168,12 +181,12 @@
 
 <style>
   .chart-container {
-    height: 400px;
+    height: 250px;
     position: relative;
   }
   
   canvas {
-    max-height: 400px;
+    max-height: 250px;
   }
   
   .loading, .no-data {
@@ -182,6 +195,24 @@
     justify-content: center;
     height: 100%;
     color: #8b949e;
-    font-size: 1.1rem;
+    font-size: 0.95rem;
+  }
+
+  @media (min-width: 640px) {
+    .chart-container {
+      height: 350px;
+    }
+    canvas {
+      max-height: 350px;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .chart-container {
+      height: 400px;
+    }
+    canvas {
+      max-height: 400px;
+    }
   }
 </style>

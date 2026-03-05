@@ -98,27 +98,28 @@
   .current-prices {
     max-height: 600px;
     overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
   
   .load-more {
     text-align: center;
     padding: 1rem;
     color: #8b949e;
-    font-size: 0.9rem;
+    font-size: 0.85rem;
     font-style: italic;
   }
   
   .price-list {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: 0.375rem;
   }
   
   .price-item {
     display: flex;
     align-items: center;
-    gap: 1rem;
-    padding: 0.75rem;
+    gap: 0.5rem;
+    padding: 0.625rem 0.5rem;
     background: #0d1117;
     border: 1px solid #30363d;
     border-radius: 6px;
@@ -127,7 +128,6 @@
   
   .price-item:hover {
     border-color: #3b82f6;
-    transform: translateX(2px);
   }
   
   .price-item.best {
@@ -138,8 +138,10 @@
   .rank {
     font-weight: 700;
     color: #8b949e;
-    min-width: 2.5rem;
-    font-size: 1.1rem;
+    min-width: 2rem;
+    font-size: 0.9rem;
+    text-align: center;
+    flex-shrink: 0;
   }
   
   .best .rank {
@@ -148,19 +150,27 @@
   
   .station-info {
     flex: 1;
+    min-width: 0;
   }
   
   .station-name {
     font-weight: 600;
     color: #e6edf3;
-    margin-bottom: 0.25rem;
+    margin-bottom: 0.15rem;
+    font-size: 0.85rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   
   .station-details {
     display: flex;
-    gap: 0.75rem;
-    font-size: 0.85rem;
+    gap: 0.5rem;
+    font-size: 0.75rem;
     color: #8b949e;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   
   .brand {
@@ -169,20 +179,22 @@
   
   .status-closed {
     display: inline-block;
-    font-size: 0.7rem;
+    font-size: 0.6rem;
     font-weight: 700;
     color: #fff;
     background: #ef4444;
-    padding: 0.2rem 0.5rem;
+    padding: 0.1rem 0.35rem;
     border-radius: 3px;
-    margin-left: 0.5rem;
+    margin-left: 0.35rem;
+    vertical-align: middle;
   }
   
   .price {
-    font-size: 1.3rem;
+    font-size: 1rem;
     font-weight: 700;
     color: #3b82f6;
-    min-width: 6rem;
+    white-space: nowrap;
+    flex-shrink: 0;
     text-align: right;
   }
   
@@ -192,12 +204,12 @@
   
   .loading, .no-data {
     text-align: center;
-    padding: 2rem;
+    padding: 1.5rem;
     color: #8b949e;
   }
   
   .current-prices::-webkit-scrollbar {
-    width: 8px;
+    width: 6px;
   }
   
   .current-prices::-webkit-scrollbar-track {
@@ -211,5 +223,44 @@
   
   .current-prices::-webkit-scrollbar-thumb:hover {
     background: #3b82f6;
+  }
+
+  @media (min-width: 640px) {
+    .price-list {
+      gap: 0.5rem;
+    }
+    .price-item {
+      gap: 0.75rem;
+      padding: 0.75rem;
+    }
+    .rank {
+      min-width: 2.5rem;
+      font-size: 1rem;
+    }
+    .station-name {
+      font-size: 0.95rem;
+    }
+    .station-details {
+      font-size: 0.85rem;
+    }
+    .price {
+      font-size: 1.2rem;
+    }
+    .status-closed {
+      font-size: 0.7rem;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .price-item {
+      gap: 1rem;
+    }
+    .price-item:hover {
+      transform: translateX(2px);
+    }
+    .price {
+      font-size: 1.3rem;
+      min-width: 6rem;
+    }
   }
 </style>

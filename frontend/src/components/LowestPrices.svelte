@@ -81,14 +81,14 @@
   .lowest-prices {
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
+    gap: 0.5rem;
   }
   
   .lowest-item {
     display: flex;
     align-items: center;
-    gap: 1rem;
-    padding: 1rem;
+    gap: 0.5rem;
+    padding: 0.625rem 0.5rem;
     background: #0d1117;
     border: 1px solid #30363d;
     border-radius: 6px;
@@ -97,7 +97,6 @@
   
   .lowest-item:hover {
     border-color: #10b981;
-    transform: scale(1.02);
   }
   
   .lowest-item.winner {
@@ -106,63 +105,118 @@
   }
   
   .medal {
-    font-size: 1.5rem;
-    min-width: 2.5rem;
+    font-size: 1.25rem;
+    min-width: 2rem;
     text-align: center;
+    flex-shrink: 0;
   }
   
   .info {
     flex: 1;
+    min-width: 0;
   }
   
   .name {
     font-weight: 600;
     color: #e6edf3;
-    margin-bottom: 0.25rem;
+    margin-bottom: 0.15rem;
+    font-size: 0.85rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   
   .status-closed {
     display: inline-block;
-    font-size: 0.7rem;
+    font-size: 0.6rem;
     font-weight: 700;
     color: #fff;
     background: #ef4444;
-    padding: 0.2rem 0.5rem;
+    padding: 0.1rem 0.35rem;
     border-radius: 3px;
-    margin-left: 0.5rem;
+    margin-left: 0.35rem;
+    vertical-align: middle;
   }
   
   .route-btn {
-    padding: 0.5rem 1rem;
+    padding: 0.4rem 0.75rem;
     background: #3b82f6;
     color: white;
     text-decoration: none;
     border-radius: 6px;
-    font-size: 0.9rem;
+    font-size: 0.8rem;
     font-weight: 600;
     transition: all 0.2s;
     white-space: nowrap;
+    touch-action: manipulation;
   }
   
   .route-btn:hover {
     background: #2563eb;
-    transform: scale(1.05);
   }
   
   .city {
-    font-size: 0.85rem;
+    font-size: 0.75rem;
     color: #8b949e;
   }
   
   .price {
-    font-size: 1.4rem;
+    font-size: 1.1rem;
     font-weight: 700;
     color: #10b981;
+    white-space: nowrap;
+    flex-shrink: 0;
   }
   
   .loading, .no-data {
     text-align: center;
-    padding: 2rem;
+    padding: 1.5rem;
     color: #8b949e;
+  }
+
+  @media (min-width: 640px) {
+    .lowest-prices {
+      gap: 0.75rem;
+    }
+    .lowest-item {
+      gap: 0.75rem;
+      padding: 0.875rem 0.75rem;
+    }
+    .medal {
+      font-size: 1.5rem;
+      min-width: 2.5rem;
+    }
+    .name {
+      font-size: 0.95rem;
+    }
+    .city {
+      font-size: 0.85rem;
+    }
+    .price {
+      font-size: 1.3rem;
+    }
+    .status-closed {
+      font-size: 0.7rem;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .lowest-item {
+      gap: 1rem;
+      padding: 1rem;
+    }
+    .lowest-item:hover {
+      transform: scale(1.02);
+    }
+    .price {
+      font-size: 1.4rem;
+    }
+    .route-btn {
+      padding: 0.5rem 1rem;
+      font-size: 0.9rem;
+    }
+    .route-btn:hover {
+      transform: scale(1.05);
+    }
   }
 </style>

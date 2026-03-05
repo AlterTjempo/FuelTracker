@@ -168,7 +168,7 @@ def get_current_lowest_prices(
 def get_lowest_prices(
     fuel_type: str = Query("diesel", regex="^(e5|e10|diesel)$"),
     limit: int = Query(10, ge=1, le=50),
-    hours: int = Query(24, ge=1, le=168),  # Last N hours
+    hours: int = Query(24, ge=1, le=1000000),
     db: Session = Depends(get_db),
 ):
     """Get the lowest fuel prices in the specified timeframe"""
@@ -290,7 +290,7 @@ def get_station_stats(
 @router.get("/history/all")
 def get_all_prices_history(
     fuel_type: str = Query("diesel", regex="^(e5|e10|diesel)$"),
-    hours: int = Query(24, ge=1, le=168),
+    hours: int = Query(24, ge=1, le=1000000),
     db: Session = Depends(get_db),
 ):
     """Get average price history across all stations for graphing"""
@@ -327,7 +327,7 @@ def get_all_prices_history(
 @router.get("/analytics/time-patterns")
 def get_time_patterns(
     fuel_type: str = Query("e5", regex="^(e5|e10|diesel)$"),
-    hours: int = Query(168, ge=24, le=720),  # At least 24 hours
+    hours: int = Query(168, ge=24, le=1000000),
     db: Session = Depends(get_db),
 ):
     """Get cheapest day and time patterns"""
@@ -415,56 +415,199 @@ def get_go_now_indicator(
     fuel_type: str = Query("e5", regex="^(e5|e10|diesel)$"),
     db: Session = Depends(get_db),
 ):
-    """Compare current average price to 24h average"""
-    fuel_column = getattr(FuelPrice, fuel_type)
+    """Smart refuel indicator using same-hour-of-day percentile + trend.
 
-    # Get current average (last hour)
-    one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
-    current_avg = (
-        db.query(func.avg(fuel_column))
+    Two signals combined:
+    1. Same-hour percentile: compare the current price against the SAME
+       hour of day (±1h) over the past 7 days. This means a 7am price is
+       only ranked against other ~7am prices, not cheap evening prices.
+    2. Trend: linear regression over the last 3 hours of hourly minimums
+       to detect whether prices are currently falling or rising.
+
+    Matrix:
+      cheap + falling  => excellent - Great price, still dropping
+      cheap + rising   => good      - Good price, grab it before it rises
+      mid   + falling  => neutral   - OK price, might improve
+      mid   + rising   => wait      - Average but getting worse
+      expensive + fall => wait      - Wait, price is coming down
+      expensive + rise => avoid     - Expensive and climbing
+    """
+    from sqlalchemy import text
+
+    fuel_column = getattr(FuelPrice, fuel_type)
+    now = datetime.now(timezone.utc)
+
+    # --- Current best price (lowest among all stations, last hour) ---
+    one_hour_ago = now - timedelta(hours=1)
+    current_min = (
+        db.query(func.min(fuel_column))
         .filter(FuelPrice.timestamp >= one_hour_ago, fuel_column.isnot(None))
         .scalar()
     )
 
-    # Get 24h average
-    one_day_ago = datetime.now(timezone.utc) - timedelta(hours=24)
-    day_avg = (
-        db.query(func.avg(fuel_column))
-        .filter(FuelPrice.timestamp >= one_day_ago, fuel_column.isnot(None))
-        .scalar()
+    insufficient = {
+        "current_price": None,
+        "percentile": None,
+        "trend": None,
+        "trend_direction": None,
+        "week_low": None,
+        "week_high": None,
+        "week_median": None,
+        "recommendation": "insufficient_data",
+    }
+
+    if current_min is None:
+        return insufficient
+
+    current_price = float(current_min)
+    current_hour = now.hour
+
+    # --- Same-hour-of-day percentile (±1 hour window, past 7 days) ---
+    # Compare current price only against historical prices from the same
+    # time-of-day window, so morning prices compete with mornings only.
+    seven_days_ago = now - timedelta(days=7)
+    hour_low = (current_hour - 1) % 24
+    hour_high = (current_hour + 1) % 24
+
+    # Build hour filter that handles wraparound (e.g. hour 23, 0, 1)
+    if hour_low < hour_high:
+        hour_filter = f"EXTRACT(HOUR FROM timestamp) BETWEEN {hour_low} AND {hour_high}"
+    else:
+        # Wraps around midnight, e.g. 23, 0, 1
+        hour_filter = f"(EXTRACT(HOUR FROM timestamp) >= {hour_low} OR EXTRACT(HOUR FROM timestamp) <= {hour_high})"
+
+    same_hour_query = text(
+        f"""
+        SELECT
+            date_trunc('hour', timestamp) AS hour_bucket,
+            MIN({fuel_type}) AS min_price
+        FROM fuel_prices
+        WHERE timestamp >= :since
+          AND {fuel_type} IS NOT NULL
+          AND {hour_filter}
+        GROUP BY date_trunc('hour', timestamp)
+        ORDER BY min_price
+    """
     )
 
-    if not current_avg or not day_avg:
-        return {
-            "current_price": None,
-            "avg_24h": None,
-            "difference": None,
-            "percentage": None,
-            "recommendation": "insufficient_data",
-        }
+    rows = db.execute(same_hour_query, {"since": seven_days_ago}).fetchall()
 
-    current = float(current_avg)
-    average = float(day_avg)
-    diff = current - average
-    percentage = (diff / average) * 100
+    if len(rows) < 6:
+        # Need at least 6 same-hour data points (~2 days worth)
+        # Fall back to all-hours percentile
+        fallback_query = text(
+            f"""
+            SELECT
+                date_trunc('hour', timestamp) AS hour_bucket,
+                MIN({fuel_type}) AS min_price
+            FROM fuel_prices
+            WHERE timestamp >= :since
+              AND {fuel_type} IS NOT NULL
+            GROUP BY date_trunc('hour', timestamp)
+            ORDER BY min_price
+        """
+        )
+        rows = db.execute(fallback_query, {"since": seven_days_ago}).fetchall()
 
-    # Determine recommendation
-    if percentage <= -3:
-        recommendation = "excellent"  # More than 3% cheaper
-    elif percentage <= -1:
-        recommendation = "good"  # 1-3% cheaper
-    elif percentage <= 1:
-        recommendation = "neutral"  # Within 1%
-    elif percentage <= 3:
-        recommendation = "wait"  # 1-3% more expensive
+        if len(rows) < 12:
+            insufficient["current_price"] = round(current_price, 3)
+            return insufficient
+
+    prices = [float(r.min_price) for r in rows]
+    total = len(prices)
+
+    below_or_equal = sum(1 for p in prices if p <= current_price)
+    percentile = round((below_or_equal / total) * 100, 1)
+
+    week_low = min(prices)
+    week_high = max(prices)
+    sorted_prices = sorted(prices)
+    mid = total // 2
+    week_median = (
+        sorted_prices[mid]
+        if total % 2 == 1
+        else (sorted_prices[mid - 1] + sorted_prices[mid]) / 2
+    )
+
+    # --- Trend: linear regression over last 3 hours ---
+    # Get hourly min prices for the last 3 hours to compute slope.
+    three_hours_ago = now - timedelta(hours=3)
+    trend_query = text(
+        f"""
+        SELECT
+            date_trunc('hour', timestamp) AS hour_bucket,
+            MIN({fuel_type}) AS min_price
+        FROM fuel_prices
+        WHERE timestamp >= :since
+          AND {fuel_type} IS NOT NULL
+        GROUP BY date_trunc('hour', timestamp)
+        ORDER BY hour_bucket
+    """
+    )
+
+    trend_rows = db.execute(trend_query, {"since": three_hours_ago}).fetchall()
+
+    # Calculate trend using simple linear regression (cents per hour)
+    trend_cents_per_hour = 0.0
+    trend_direction = "stable"
+    if len(trend_rows) >= 2:
+        n = len(trend_rows)
+        # x = 0, 1, 2, ... (hour index), y = price
+        trend_prices = [float(r.min_price) for r in trend_rows]
+        x_mean = (n - 1) / 2.0
+        y_mean = sum(trend_prices) / n
+
+        numerator = sum((i - x_mean) * (p - y_mean) for i, p in enumerate(trend_prices))
+        denominator = sum((i - x_mean) ** 2 for i in range(n))
+
+        if denominator > 0:
+            slope = numerator / denominator  # euros per hour
+            trend_cents_per_hour = round(slope * 100, 2)  # convert to cents
+
+            # Threshold: ±0.1 cent/hour to avoid noise
+            if trend_cents_per_hour < -0.1:
+                trend_direction = "falling"
+            elif trend_cents_per_hour > 0.1:
+                trend_direction = "rising"
+            else:
+                trend_direction = "stable"
+
+    # --- Combined recommendation ---
+    # Percentile buckets: cheap (<35), mid (35-65), expensive (>65)
+    # Trend: falling, stable, rising
+    if percentile <= 35:
+        # Cheap
+        if trend_direction == "falling":
+            recommendation = "excellent"  # Great price, still dropping
+        elif trend_direction == "stable":
+            recommendation = "good"  # Good price, stable
+        else:
+            recommendation = "good"  # Good price, grab it before it rises
+    elif percentile <= 65:
+        # Mid-range
+        if trend_direction == "falling":
+            recommendation = "neutral"  # OK price, might improve
+        elif trend_direction == "stable":
+            recommendation = "neutral"  # Average price
+        else:
+            recommendation = "wait"  # Average but getting worse
     else:
-        recommendation = "avoid"  # More than 3% more expensive
+        # Expensive
+        if trend_direction == "falling":
+            recommendation = "wait"  # Wait, price is coming down
+        elif trend_direction == "stable":
+            recommendation = "wait"  # Expensive, wait for drop
+        else:
+            recommendation = "avoid"  # Expensive and climbing
 
     return {
-        "current_price": round(current, 3),
-        "avg_24h": round(average, 3),
-        "difference": round(diff, 3),
-        "percentage": round(percentage, 2),
+        "current_price": round(current_price, 3),
+        "percentile": percentile,
+        "trend": trend_cents_per_hour,
+        "trend_direction": trend_direction,
+        "week_low": round(week_low, 3),
+        "week_high": round(week_high, 3),
+        "week_median": round(week_median, 3),
         "recommendation": recommendation,
     }
 
@@ -472,7 +615,7 @@ def get_go_now_indicator(
 @router.get("/analytics/top-stations")
 def get_top_stations(
     fuel_type: str = Query("e5", regex="^(e5|e10|diesel)$"),
-    hours: int = Query(168, ge=24, le=720),
+    hours: int = Query(168, ge=24, le=1000000),
     limit: int = Query(3, ge=1, le=10),
     db: Session = Depends(get_db),
 ):
