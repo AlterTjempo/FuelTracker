@@ -21,7 +21,11 @@ class Settings(BaseSettings):
         """Parse comma-separated origins into a list"""
         if self.ALLOWED_ORIGINS == "*":
             return ["*"]
-        return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",")if origin.strip()]
+        return [
+            origin.strip()
+            for origin in self.ALLOWED_ORIGINS.split(",")
+            if origin.strip()
+        ]
 
     class Config:
         env_file = str(Path(__file__).resolve().parent.parent.parent / "config.env")
