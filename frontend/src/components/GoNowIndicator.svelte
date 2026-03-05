@@ -106,46 +106,45 @@
 
 <style>
   .go-now-container {
-    margin-bottom: 1.5rem;
+    margin-bottom: 1rem;
   }
   
   .card {
     background: #0d1117;
     border: 2px solid #30363d;
     border-radius: 8px;
-    padding: 1.5rem;
+    padding: 1rem;
     transition: all 0.3s ease;
   }
   
   .card:not(.insufficient):hover {
-    transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   }
   
   .header {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    margin-bottom: 1rem;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
   }
   
   .icon {
-    font-size: 1.5rem;
+    font-size: 1.25rem;
   }
   
   h3 {
     margin: 0;
     color: #c9d1d9;
-    font-size: 1.125rem;
+    font-size: 1rem;
     font-weight: 600;
   }
   
   .recommendation {
-    font-size: 1.5rem;
+    font-size: 1.1rem;
     font-weight: bold;
     text-align: center;
-    margin-bottom: 1.5rem;
-    padding: 0.75rem;
+    margin-bottom: 1rem;
+    padding: 0.5rem;
     background: rgba(255, 255, 255, 0.03);
     border-radius: 6px;
   }
@@ -154,14 +153,14 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 1.5rem;
-    margin-bottom: 1rem;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
   }
   
   .price-box {
     flex: 1;
-    max-width: 150px;
-    padding: 1rem;
+    max-width: 140px;
+    padding: 0.625rem 0.5rem;
     background: #161b22;
     border: 2px solid #30363d;
     border-radius: 8px;
@@ -173,44 +172,115 @@
   }
   
   .price-box .label {
-    font-size: 0.75rem;
+    font-size: 0.65rem;
     color: #8b949e;
     text-transform: uppercase;
     letter-spacing: 0.5px;
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.25rem;
   }
   
   .price-box .value {
-    font-size: 1.5rem;
+    font-size: 1.15rem;
     font-weight: bold;
     color: #c9d1d9;
   }
   
   .vs {
     color: #6e7681;
-    font-size: 0.875rem;
+    font-size: 0.75rem;
     font-weight: 600;
+    flex-shrink: 0;
   }
   
   .difference {
     text-align: center;
-    font-size: 1.25rem;
+    font-size: 1rem;
     font-weight: bold;
   }
   
   .difference .amount {
-    font-size: 0.875rem;
+    font-size: 0.8rem;
     opacity: 0.8;
-    margin-left: 0.5rem;
+    margin-left: 0.35rem;
   }
   
   .loading, .no-data {
     text-align: center;
-    padding: 2rem;
+    padding: 1.5rem;
     color: #8b949e;
   }
   
   .insufficient {
     border-color: #30363d;
+  }
+
+  @media (min-width: 640px) {
+    .go-now-container {
+      margin-bottom: 1.5rem;
+    }
+    .card {
+      padding: 1.25rem;
+    }
+    .header {
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+    }
+    .icon {
+      font-size: 1.5rem;
+    }
+    h3 {
+      font-size: 1.125rem;
+    }
+    .recommendation {
+      font-size: 1.35rem;
+      margin-bottom: 1.25rem;
+      padding: 0.75rem;
+    }
+    .price-comparison {
+      gap: 1.25rem;
+      margin-bottom: 1rem;
+    }
+    .price-box {
+      max-width: 150px;
+      padding: 0.875rem;
+    }
+    .price-box .label {
+      font-size: 0.75rem;
+      margin-bottom: 0.5rem;
+    }
+    .price-box .value {
+      font-size: 1.35rem;
+    }
+    .vs {
+      font-size: 0.875rem;
+    }
+    .difference {
+      font-size: 1.15rem;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .card {
+      padding: 1.5rem;
+    }
+    .card:not(.insufficient):hover {
+      transform: translateY(-2px);
+    }
+    .recommendation {
+      font-size: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+    .price-comparison {
+      gap: 1.5rem;
+    }
+    .price-box .value {
+      font-size: 1.5rem;
+    }
+    .difference {
+      font-size: 1.25rem;
+    }
+    .difference .amount {
+      font-size: 0.875rem;
+    }
   }
 </style>
