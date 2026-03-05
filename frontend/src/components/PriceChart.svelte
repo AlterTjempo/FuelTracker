@@ -159,9 +159,13 @@
     fetchData()
   }
   
-  // Reactive statement to update chart when canvas or data changes
+  // Reactive statement to update chart when canvas or data changes,
+  // and destroy it when data becomes empty or canvas is unmounted
   $: if (chartCanvas && data.length > 0) {
     updateChart()
+  } else if (chart) {
+    chart.destroy()
+    chart = null
   }
 </script>
 
