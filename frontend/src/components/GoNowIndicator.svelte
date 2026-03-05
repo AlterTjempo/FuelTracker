@@ -69,28 +69,39 @@
       <div class="recommendation" style="color: {getColor(indicator.recommendation)}">
         {getMessage(indicator.recommendation)}
       </div>
-      
-      <div class="price-comparison">
-        <div class="price-box current" style="border-color: {getColor(indicator.recommendation)}">
-          <div class="label">Current Price</div>
-          <div class="value">€{indicator.current_price}</div>
+
+      <div class="percentile-bar-section">
+        <div class="percentile-label">
+          Current best price: <strong>€{indicator.current_price}</strong>
         </div>
-        
-        <div class="vs">vs</div>
-        
-        <div class="price-box average">
-          <div class="label">24h Average</div>
-          <div class="value">€{indicator.avg_24h}</div>
+        <div class="percentile-track">
+          <div class="percentile-fill" style="width: {indicator.percentile}%; background: {getColor(indicator.recommendation)}"></div>
+          <div class="percentile-marker" style="left: {indicator.percentile}%">
+            <div class="marker-dot" style="background: {getColor(indicator.recommendation)}"></div>
+          </div>
+          <div class="percentile-labels">
+            <span class="cheapest">Cheapest</span>
+            <span class="priciest">Priciest</span>
+          </div>
+        </div>
+        <div class="percentile-detail">
+          Cheaper than <strong>{Math.round(100 - indicator.percentile)}%</strong> of prices this week
         </div>
       </div>
       
-      <div class="difference" style="color: {indicator.percentage < 0 ? '#10b981' : '#ef4444'}">
-        <span class="percentage">
-          {indicator.percentage > 0 ? '+' : ''}{indicator.percentage}%
-        </span>
-        <span class="amount">
-          ({indicator.difference > 0 ? '+' : ''}€{Math.abs(indicator.difference).toFixed(3)})
-        </span>
+      <div class="week-range">
+        <div class="range-item low">
+          <div class="range-label">Week Low</div>
+          <div class="range-value">€{indicator.week_low}</div>
+        </div>
+        <div class="range-item mid">
+          <div class="range-label">Week Median</div>
+          <div class="range-value">€{indicator.week_median}</div>
+        </div>
+        <div class="range-item high">
+          <div class="range-label">Week High</div>
+          <div class="range-value">€{indicator.week_high}</div>
+        </div>
       </div>
     </div>
   {:else}
@@ -99,7 +110,7 @@
         <span class="icon">⏳</span>
         <h3>Should I refuel now?</h3>
       </div>
-      <p class="no-data">Not enough data yet. Check back after 24 hours of price collection!</p>
+      <p class="no-data">Not enough data yet. Check back after more price data is collected!</p>
     </div>
   {/if}
 </div>
@@ -148,60 +159,113 @@
     background: rgba(255, 255, 255, 0.03);
     border-radius: 6px;
   }
-  
-  .price-comparison {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.75rem;
-    margin-bottom: 0.75rem;
+
+  /* Percentile bar */
+  .percentile-bar-section {
+    margin-bottom: 1rem;
   }
-  
-  .price-box {
-    flex: 1;
-    max-width: 140px;
-    padding: 0.625rem 0.5rem;
-    background: #161b22;
-    border: 2px solid #30363d;
-    border-radius: 8px;
+
+  .percentile-label {
+    font-size: 0.85rem;
+    color: #c9d1d9;
+    margin-bottom: 0.5rem;
     text-align: center;
   }
-  
-  .price-box.current {
-    border-width: 2px;
+
+  .percentile-label strong {
+    color: #e6edf3;
   }
-  
-  .price-box .label {
-    font-size: 0.65rem;
-    color: #8b949e;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+
+  .percentile-track {
+    position: relative;
+    height: 10px;
+    background: #21262d;
+    border-radius: 5px;
+    overflow: visible;
     margin-bottom: 0.25rem;
   }
-  
-  .price-box .value {
-    font-size: 1.15rem;
-    font-weight: bold;
+
+  .percentile-fill {
+    height: 100%;
+    border-radius: 5px;
+    transition: width 0.6s ease;
+    opacity: 0.35;
+  }
+
+  .percentile-marker {
+    position: absolute;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 1;
+  }
+
+  .marker-dot {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 2px solid #0d1117;
+    box-shadow: 0 0 6px rgba(0,0,0,0.5);
+  }
+
+  .percentile-labels {
+    display: flex;
+    justify-content: space-between;
+    padding-top: 0.375rem;
+  }
+
+  .percentile-labels span {
+    font-size: 0.65rem;
+    color: #6e7681;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+
+  .percentile-detail {
+    text-align: center;
+    font-size: 0.8rem;
+    color: #8b949e;
+    margin-top: 0.375rem;
+  }
+
+  .percentile-detail strong {
+    color: #e6edf3;
+  }
+
+  /* Week range */
+  .week-range {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid #30363d;
+    margin-top: 0.25rem;
+  }
+
+  .range-item {
+    text-align: center;
+    flex: 1;
+  }
+
+  .range-label {
+    font-size: 0.6rem;
+    color: #6e7681;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    margin-bottom: 0.2rem;
+  }
+
+  .range-value {
+    font-size: 0.9rem;
+    font-weight: 700;
     color: #c9d1d9;
   }
-  
-  .vs {
-    color: #6e7681;
-    font-size: 0.75rem;
-    font-weight: 600;
-    flex-shrink: 0;
+
+  .range-item.low .range-value {
+    color: #10b981;
   }
-  
-  .difference {
-    text-align: center;
-    font-size: 1rem;
-    font-weight: bold;
-  }
-  
-  .difference .amount {
-    font-size: 0.8rem;
-    opacity: 0.8;
-    margin-left: 0.35rem;
+
+  .range-item.high .range-value {
+    color: #ef4444;
   }
   
   .loading, .no-data {
@@ -236,26 +300,27 @@
       margin-bottom: 1.25rem;
       padding: 0.75rem;
     }
-    .price-comparison {
-      gap: 1.25rem;
-      margin-bottom: 1rem;
+    .percentile-label {
+      font-size: 0.95rem;
     }
-    .price-box {
-      max-width: 150px;
-      padding: 0.875rem;
+    .percentile-track {
+      height: 12px;
     }
-    .price-box .label {
-      font-size: 0.75rem;
-      margin-bottom: 0.5rem;
+    .marker-dot {
+      width: 18px;
+      height: 18px;
     }
-    .price-box .value {
-      font-size: 1.35rem;
+    .percentile-labels span {
+      font-size: 0.7rem;
     }
-    .vs {
-      font-size: 0.875rem;
+    .percentile-detail {
+      font-size: 0.85rem;
     }
-    .difference {
-      font-size: 1.15rem;
+    .range-label {
+      font-size: 0.65rem;
+    }
+    .range-value {
+      font-size: 1rem;
     }
   }
 
@@ -270,17 +335,17 @@
       font-size: 1.5rem;
       margin-bottom: 1.5rem;
     }
-    .price-comparison {
-      gap: 1.5rem;
+    .percentile-bar-section {
+      margin-bottom: 1.25rem;
     }
-    .price-box .value {
-      font-size: 1.5rem;
+    .percentile-label {
+      font-size: 1rem;
     }
-    .difference {
-      font-size: 1.25rem;
+    .range-label {
+      font-size: 0.7rem;
     }
-    .difference .amount {
-      font-size: 0.875rem;
+    .range-value {
+      font-size: 1.1rem;
     }
   }
 </style>

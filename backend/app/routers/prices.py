@@ -415,56 +415,99 @@ def get_go_now_indicator(
     fuel_type: str = Query("e5", regex="^(e5|e10|diesel)$"),
     db: Session = Depends(get_db),
 ):
-    """Compare current average price to 24h average"""
+    """Rank current lowest price as a percentile within the 7-day price distribution.
+    
+    Instead of comparing to a simple average (easily skewed by spikes), we
+    calculate where the current best price sits in the full distribution of
+    min-prices observed over the past 7 days. A percentile of 10 means the
+    price is cheaper than 90% of historical observations - very robust
+    against short-term surges.
+    """
+    from sqlalchemy import text
+
     fuel_column = getattr(FuelPrice, fuel_type)
 
-    # Get current average (last hour)
+    # --- Current best price (lowest price among all stations in the last hour) ---
     one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
-    current_avg = (
-        db.query(func.avg(fuel_column))
+    current_min = (
+        db.query(func.min(fuel_column))
         .filter(FuelPrice.timestamp >= one_hour_ago, fuel_column.isnot(None))
         .scalar()
     )
 
-    # Get 24h average
-    one_day_ago = datetime.now(timezone.utc) - timedelta(hours=24)
-    day_avg = (
-        db.query(func.avg(fuel_column))
-        .filter(FuelPrice.timestamp >= one_day_ago, fuel_column.isnot(None))
-        .scalar()
-    )
-
-    if not current_avg or not day_avg:
+    if current_min is None:
         return {
             "current_price": None,
-            "avg_24h": None,
-            "difference": None,
-            "percentage": None,
+            "percentile": None,
+            "week_low": None,
+            "week_high": None,
+            "week_median": None,
             "recommendation": "insufficient_data",
         }
 
-    current = float(current_avg)
-    average = float(day_avg)
-    diff = current - average
-    percentage = (diff / average) * 100
+    current_price = float(current_min)
 
-    # Determine recommendation
-    if percentage <= -3:
-        recommendation = "excellent"  # More than 3% cheaper
-    elif percentage <= -1:
-        recommendation = "good"  # 1-3% cheaper
-    elif percentage <= 1:
-        recommendation = "neutral"  # Within 1%
-    elif percentage <= 3:
-        recommendation = "wait"  # 1-3% more expensive
+    # --- 7-day distribution of hourly minimum prices ---
+    # We bucket prices into hourly minimums first, so each hour gets one
+    # data point regardless of how many stations/readings exist. This
+    # prevents recent hours (with more readings) from skewing results.
+    seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
+
+    hourly_mins_query = text(f"""
+        SELECT
+            date_trunc('hour', timestamp) AS hour_bucket,
+            MIN({fuel_type}) AS min_price
+        FROM fuel_prices
+        WHERE timestamp >= :since
+          AND {fuel_type} IS NOT NULL
+        GROUP BY date_trunc('hour', timestamp)
+        ORDER BY min_price
+    """)
+
+    rows = db.execute(hourly_mins_query, {"since": seven_days_ago}).fetchall()
+
+    if len(rows) < 12:
+        # Need at least 12 hours of data for meaningful percentile
+        return {
+            "current_price": round(current_price, 3),
+            "percentile": None,
+            "week_low": None,
+            "week_high": None,
+            "week_median": None,
+            "recommendation": "insufficient_data",
+        }
+
+    prices = [float(r.min_price) for r in rows]
+    total = len(prices)
+
+    # Count how many historical hourly-minimums are <= current price
+    below_or_equal = sum(1 for p in prices if p <= current_price)
+    percentile = round((below_or_equal / total) * 100, 1)
+
+    week_low = min(prices)
+    week_high = max(prices)
+    mid = total // 2
+    week_median = prices[mid] if total % 2 == 1 else (prices[mid - 1] + prices[mid]) / 2
+
+    # Determine recommendation based on percentile
+    # Lower percentile = price is closer to the week's cheapest
+    if percentile <= 15:
+        recommendation = "excellent"   # In the cheapest 15%
+    elif percentile <= 35:
+        recommendation = "good"        # In the cheapest 35%
+    elif percentile <= 65:
+        recommendation = "neutral"     # Middle of the range
+    elif percentile <= 85:
+        recommendation = "wait"        # In the pricier 35%
     else:
-        recommendation = "avoid"  # More than 3% more expensive
+        recommendation = "avoid"       # In the most expensive 15%
 
     return {
-        "current_price": round(current, 3),
-        "avg_24h": round(average, 3),
-        "difference": round(diff, 3),
-        "percentage": round(percentage, 2),
+        "current_price": round(current_price, 3),
+        "percentile": percentile,
+        "week_low": round(week_low, 3),
+        "week_high": round(week_high, 3),
+        "week_median": round(week_median, 3),
         "recommendation": recommendation,
     }
 
