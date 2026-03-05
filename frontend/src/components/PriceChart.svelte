@@ -177,12 +177,12 @@
 
 <style>
   .chart-container {
-    height: 400px;
+    height: 250px;
     position: relative;
   }
   
   canvas {
-    max-height: 400px;
+    max-height: 250px;
   }
   
   .loading, .no-data {
@@ -191,6 +191,24 @@
     justify-content: center;
     height: 100%;
     color: #8b949e;
-    font-size: 1.1rem;
+    font-size: 0.95rem;
+  }
+
+  @media (min-width: 640px) {
+    .chart-container {
+      height: 350px;
+    }
+    canvas {
+      max-height: 350px;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .chart-container {
+      height: 400px;
+    }
+    canvas {
+      max-height: 400px;
+    }
   }
 </style>

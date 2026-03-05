@@ -103,14 +103,14 @@
   .current-lowest {
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
+    gap: 0.5rem;
   }
   
   .price-item {
     display: flex;
-    align-items: center;
-    gap: 1rem;
-    padding: 1rem;
+    align-items: flex-start;
+    gap: 0.5rem;
+    padding: 0.75rem 0.5rem;
     background: #0d1117;
     border: 1px solid #30363d;
     border-radius: 6px;
@@ -119,7 +119,6 @@
   
   .price-item:hover {
     border-color: #3b82f6;
-    transform: translateX(4px);
   }
   
   .price-item.best {
@@ -128,45 +127,52 @@
   }
   
   .rank {
-    font-size: 1.5rem;
-    min-width: 2.5rem;
+    font-size: 1.25rem;
+    min-width: 2rem;
     text-align: center;
+    flex-shrink: 0;
+    padding-top: 0.125rem;
   }
   
   .details {
     flex: 1;
+    min-width: 0;
   }
   
   .station-info {
     display: flex;
     flex-direction: column;
-    gap: 0.25rem;
+    gap: 0.15rem;
   }
   
   .name {
     font-weight: 600;
     color: #e6edf3;
-    font-size: 1rem;
+    font-size: 0.875rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   
   .status-closed {
     display: inline-block;
-    font-size: 0.7rem;
+    font-size: 0.6rem;
     font-weight: 700;
     color: #fff;
     background: #ef4444;
-    padding: 0.2rem 0.5rem;
+    padding: 0.1rem 0.35rem;
     border-radius: 3px;
-    margin-left: 0.5rem;
+    margin-left: 0.35rem;
+    vertical-align: middle;
   }
   
   .location {
-    font-size: 0.85rem;
+    font-size: 0.75rem;
     color: #8b949e;
   }
   
   .time-updated {
-    font-size: 0.8rem;
+    font-size: 0.7rem;
     color: #6e7681;
     font-style: italic;
   }
@@ -175,35 +181,84 @@
     display: flex;
     flex-direction: column;
     align-items: flex-end;
-    gap: 0.5rem;
+    gap: 0.375rem;
+    flex-shrink: 0;
   }
   
   .price {
-    font-size: 1.6rem;
+    font-size: 1.2rem;
     font-weight: 700;
     color: #3b82f6;
+    white-space: nowrap;
   }
   
   .route-btn {
-    padding: 0.5rem 1rem;
+    padding: 0.4rem 0.75rem;
     background: #3b82f6;
     color: white;
     text-decoration: none;
     border-radius: 6px;
-    font-size: 0.9rem;
+    font-size: 0.8rem;
     font-weight: 600;
     transition: all 0.2s;
     white-space: nowrap;
+    touch-action: manipulation;
   }
   
   .route-btn:hover {
     background: #2563eb;
-    transform: scale(1.05);
   }
   
   .loading, .no-data {
     text-align: center;
-    padding: 2rem;
+    padding: 1.5rem;
     color: #8b949e;
+  }
+
+  @media (min-width: 640px) {
+    .current-lowest {
+      gap: 0.75rem;
+    }
+    .price-item {
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.875rem 0.75rem;
+    }
+    .rank {
+      font-size: 1.5rem;
+      min-width: 2.5rem;
+    }
+    .name {
+      font-size: 1rem;
+    }
+    .location {
+      font-size: 0.85rem;
+    }
+    .time-updated {
+      font-size: 0.8rem;
+    }
+    .price {
+      font-size: 1.4rem;
+    }
+    .route-btn {
+      padding: 0.5rem 1rem;
+      font-size: 0.9rem;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .price-item {
+      gap: 1rem;
+      padding: 1rem;
+    }
+    .price-item:hover {
+      transform: translateX(4px);
+    }
+    .price {
+      font-size: 1.6rem;
+    }
+    .route-btn:hover {
+      transform: scale(1.05);
+    }
   }
 </style>
