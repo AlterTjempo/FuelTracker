@@ -476,7 +476,8 @@ def get_go_now_indicator(
         # Wraps around midnight, e.g. 23, 0, 1
         hour_filter = f"(EXTRACT(HOUR FROM timestamp) >= {hour_low} OR EXTRACT(HOUR FROM timestamp) <= {hour_high})"
 
-    same_hour_query = text(f"""
+    same_hour_query = text(
+        f"""
         SELECT
             date_trunc('hour', timestamp) AS hour_bucket,
             MIN({fuel_type}) AS min_price
@@ -486,14 +487,16 @@ def get_go_now_indicator(
           AND {hour_filter}
         GROUP BY date_trunc('hour', timestamp)
         ORDER BY min_price
-    """)
+    """
+    )
 
     rows = db.execute(same_hour_query, {"since": seven_days_ago}).fetchall()
 
     if len(rows) < 6:
         # Need at least 6 same-hour data points (~2 days worth)
         # Fall back to all-hours percentile
-        fallback_query = text(f"""
+        fallback_query = text(
+            f"""
             SELECT
                 date_trunc('hour', timestamp) AS hour_bucket,
                 MIN({fuel_type}) AS min_price
@@ -502,7 +505,8 @@ def get_go_now_indicator(
               AND {fuel_type} IS NOT NULL
             GROUP BY date_trunc('hour', timestamp)
             ORDER BY min_price
-        """)
+        """
+        )
         rows = db.execute(fallback_query, {"since": seven_days_ago}).fetchall()
 
         if len(rows) < 12:
@@ -519,12 +523,17 @@ def get_go_now_indicator(
     week_high = max(prices)
     sorted_prices = sorted(prices)
     mid = total // 2
-    week_median = sorted_prices[mid] if total % 2 == 1 else (sorted_prices[mid - 1] + sorted_prices[mid]) / 2
+    week_median = (
+        sorted_prices[mid]
+        if total % 2 == 1
+        else (sorted_prices[mid - 1] + sorted_prices[mid]) / 2
+    )
 
     # --- Trend: linear regression over last 3 hours ---
     # Get hourly min prices for the last 3 hours to compute slope.
     three_hours_ago = now - timedelta(hours=3)
-    trend_query = text(f"""
+    trend_query = text(
+        f"""
         SELECT
             date_trunc('hour', timestamp) AS hour_bucket,
             MIN({fuel_type}) AS min_price
@@ -533,7 +542,8 @@ def get_go_now_indicator(
           AND {fuel_type} IS NOT NULL
         GROUP BY date_trunc('hour', timestamp)
         ORDER BY hour_bucket
-    """)
+    """
+    )
 
     trend_rows = db.execute(trend_query, {"since": three_hours_ago}).fetchall()
 
@@ -570,25 +580,25 @@ def get_go_now_indicator(
         if trend_direction == "falling":
             recommendation = "excellent"  # Great price, still dropping
         elif trend_direction == "stable":
-            recommendation = "good"       # Good price, stable
+            recommendation = "good"  # Good price, stable
         else:
-            recommendation = "good"       # Good price, grab it before it rises
+            recommendation = "good"  # Good price, grab it before it rises
     elif percentile <= 65:
         # Mid-range
         if trend_direction == "falling":
-            recommendation = "neutral"    # OK price, might improve
+            recommendation = "neutral"  # OK price, might improve
         elif trend_direction == "stable":
-            recommendation = "neutral"    # Average price
+            recommendation = "neutral"  # Average price
         else:
-            recommendation = "wait"       # Average but getting worse
+            recommendation = "wait"  # Average but getting worse
     else:
         # Expensive
         if trend_direction == "falling":
-            recommendation = "wait"       # Wait, price is coming down
+            recommendation = "wait"  # Wait, price is coming down
         elif trend_direction == "stable":
-            recommendation = "wait"       # Expensive, wait for drop
+            recommendation = "wait"  # Expensive, wait for drop
         else:
-            recommendation = "avoid"      # Expensive and climbing
+            recommendation = "avoid"  # Expensive and climbing
 
     return {
         "current_price": round(current_price, 3),
