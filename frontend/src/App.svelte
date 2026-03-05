@@ -10,11 +10,20 @@
   let selectedHours = 24
   let activeTab = 'overview'
   
+  // Calculate YTD hours (from Jan 1 of current year to now)
+  function getYTDHours() {
+    const now = new Date()
+    const startOfYear = new Date(now.getFullYear(), 0, 1)
+    const diffMs = now - startOfYear
+    return Math.floor(diffMs / (1000 * 60 * 60))
+  }
+  
   const timeRanges = [
     { label: '24h', hours: 24 },
     { label: '3d', hours: 72 },
     { label: '7d', hours: 168 },
     { label: '1m', hours: 720 },
+    { label: 'YTD', hours: getYTDHours() },
     { label: 'All', hours: 999999 }
   ]
 </script>

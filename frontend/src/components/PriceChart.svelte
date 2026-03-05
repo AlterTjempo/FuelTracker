@@ -16,13 +16,17 @@
   
   async function fetchData() {
     try {
+      loading = true
       const response = await fetch(`${API_BASE}/prices/history/all?fuel_type=${fuelType}&hours=${hours}`)
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status} ${response.statusText}`)
+      }
       const result = await response.json()
       data = result
-      updateChart()
       loading = false
     } catch (error) {
       console.error('Error fetching data:', error)
+      data = []
       loading = false
     }
   }
@@ -153,6 +157,11 @@
   
   $: if (fuelType || hours) {
     fetchData()
+  }
+  
+  // Reactive statement to update chart when canvas or data changes
+  $: if (chartCanvas && data.length > 0) {
+    updateChart()
   }
 </script>
 

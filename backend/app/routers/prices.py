@@ -168,7 +168,7 @@ def get_current_lowest_prices(
 def get_lowest_prices(
     fuel_type: str = Query("diesel", regex="^(e5|e10|diesel)$"),
     limit: int = Query(10, ge=1, le=50),
-    hours: int = Query(24, ge=1, le=168),  # Last N hours
+    hours: int = Query(24, ge=1, le=1000000),
     db: Session = Depends(get_db),
 ):
     """Get the lowest fuel prices in the specified timeframe"""
@@ -290,7 +290,7 @@ def get_station_stats(
 @router.get("/history/all")
 def get_all_prices_history(
     fuel_type: str = Query("diesel", regex="^(e5|e10|diesel)$"),
-    hours: int = Query(24, ge=1, le=168),
+    hours: int = Query(24, ge=1, le=1000000),
     db: Session = Depends(get_db),
 ):
     """Get average price history across all stations for graphing"""
@@ -327,7 +327,7 @@ def get_all_prices_history(
 @router.get("/analytics/time-patterns")
 def get_time_patterns(
     fuel_type: str = Query("e5", regex="^(e5|e10|diesel)$"),
-    hours: int = Query(168, ge=24, le=720),  # At least 24 hours
+    hours: int = Query(168, ge=24, le=1000000),
     db: Session = Depends(get_db),
 ):
     """Get cheapest day and time patterns"""
@@ -472,7 +472,7 @@ def get_go_now_indicator(
 @router.get("/analytics/top-stations")
 def get_top_stations(
     fuel_type: str = Query("e5", regex="^(e5|e10|diesel)$"),
-    hours: int = Query(168, ge=24, le=720),
+    hours: int = Query(168, ge=24, le=1000000),
     limit: int = Query(3, ge=1, le=10),
     db: Session = Depends(get_db),
 ):
