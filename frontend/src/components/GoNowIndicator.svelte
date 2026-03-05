@@ -54,6 +54,23 @@
     }
     return messages[recommendation] || 'No data'
   }
+
+  function getTrendIcon(direction) {
+    const icons = { 'falling': '📉', 'rising': '📈', 'stable': '➡️' }
+    return icons[direction] || '➡️'
+  }
+
+  function getTrendLabel(direction, cents) {
+    if (direction === 'falling') return `Falling ${Math.abs(cents)}¢/hr`
+    if (direction === 'rising') return `Rising ${Math.abs(cents)}¢/hr`
+    return 'Stable'
+  }
+
+  function getTrendColor(direction) {
+    if (direction === 'falling') return '#10b981'
+    if (direction === 'rising') return '#ef4444'
+    return '#6b7280'
+  }
 </script>
 
 <div class="go-now-container">
@@ -85,9 +102,20 @@
           </div>
         </div>
         <div class="percentile-detail">
-          Cheaper than <strong>{Math.round(100 - indicator.percentile)}%</strong> of prices this week
+          Cheaper than <strong>{Math.round(100 - indicator.percentile)}%</strong> of prices at this time of day
         </div>
       </div>
+
+      {#if indicator.trend_direction}
+        <div class="trend-section">
+          <div class="trend-badge" style="background: {getTrendColor(indicator.trend_direction)}20; border-color: {getTrendColor(indicator.trend_direction)}40">
+            <span class="trend-icon">{getTrendIcon(indicator.trend_direction)}</span>
+            <span class="trend-text" style="color: {getTrendColor(indicator.trend_direction)}">
+              {getTrendLabel(indicator.trend_direction, indicator.trend)}
+            </span>
+          </div>
+        </div>
+      {/if}
       
       <div class="week-range">
         <div class="range-item low">
@@ -231,6 +259,31 @@
     color: #e6edf3;
   }
 
+  /* Trend badge */
+  .trend-section {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 1rem;
+  }
+
+  .trend-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.375rem 0.75rem;
+    border: 1px solid;
+    border-radius: 999px;
+    font-size: 0.8rem;
+  }
+
+  .trend-icon {
+    font-size: 0.9rem;
+  }
+
+  .trend-text {
+    font-weight: 600;
+  }
+
   /* Week range */
   .week-range {
     display: flex;
@@ -316,6 +369,10 @@
     .percentile-detail {
       font-size: 0.85rem;
     }
+    .trend-badge {
+      font-size: 0.85rem;
+      padding: 0.4rem 0.875rem;
+    }
     .range-label {
       font-size: 0.65rem;
     }
@@ -340,6 +397,10 @@
     }
     .percentile-label {
       font-size: 1rem;
+    }
+    .trend-badge {
+      font-size: 0.9rem;
+      padding: 0.5rem 1rem;
     }
     .range-label {
       font-size: 0.7rem;

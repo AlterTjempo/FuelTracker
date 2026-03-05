@@ -415,45 +415,116 @@ def get_go_now_indicator(
     fuel_type: str = Query("e5", regex="^(e5|e10|diesel)$"),
     db: Session = Depends(get_db),
 ):
-    """Rank current lowest price as a percentile within the 7-day price distribution.
-    
-    Instead of comparing to a simple average (easily skewed by spikes), we
-    calculate where the current best price sits in the full distribution of
-    min-prices observed over the past 7 days. A percentile of 10 means the
-    price is cheaper than 90% of historical observations - very robust
-    against short-term surges.
+    """Smart refuel indicator using same-hour-of-day percentile + trend.
+
+    Two signals combined:
+    1. Same-hour percentile: compare the current price against the SAME
+       hour of day (±1h) over the past 7 days. This means a 7am price is
+       only ranked against other ~7am prices, not cheap evening prices.
+    2. Trend: linear regression over the last 3 hours of hourly minimums
+       to detect whether prices are currently falling or rising.
+
+    Matrix:
+      cheap + falling  => excellent - Great price, still dropping
+      cheap + rising   => good      - Good price, grab it before it rises
+      mid   + falling  => neutral   - OK price, might improve
+      mid   + rising   => wait      - Average but getting worse
+      expensive + fall => wait      - Wait, price is coming down
+      expensive + rise => avoid     - Expensive and climbing
     """
     from sqlalchemy import text
 
     fuel_column = getattr(FuelPrice, fuel_type)
+    now = datetime.now(timezone.utc)
 
-    # --- Current best price (lowest price among all stations in the last hour) ---
-    one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+    # --- Current best price (lowest among all stations, last hour) ---
+    one_hour_ago = now - timedelta(hours=1)
     current_min = (
         db.query(func.min(fuel_column))
         .filter(FuelPrice.timestamp >= one_hour_ago, fuel_column.isnot(None))
         .scalar()
     )
 
+    insufficient = {
+        "current_price": None,
+        "percentile": None,
+        "trend": None,
+        "trend_direction": None,
+        "week_low": None,
+        "week_high": None,
+        "week_median": None,
+        "recommendation": "insufficient_data",
+    }
+
     if current_min is None:
-        return {
-            "current_price": None,
-            "percentile": None,
-            "week_low": None,
-            "week_high": None,
-            "week_median": None,
-            "recommendation": "insufficient_data",
-        }
+        return insufficient
 
     current_price = float(current_min)
+    current_hour = now.hour
 
-    # --- 7-day distribution of hourly minimum prices ---
-    # We bucket prices into hourly minimums first, so each hour gets one
-    # data point regardless of how many stations/readings exist. This
-    # prevents recent hours (with more readings) from skewing results.
-    seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
+    # --- Same-hour-of-day percentile (±1 hour window, past 7 days) ---
+    # Compare current price only against historical prices from the same
+    # time-of-day window, so morning prices compete with mornings only.
+    seven_days_ago = now - timedelta(days=7)
+    hour_low = (current_hour - 1) % 24
+    hour_high = (current_hour + 1) % 24
 
-    hourly_mins_query = text(f"""
+    # Build hour filter that handles wraparound (e.g. hour 23, 0, 1)
+    if hour_low < hour_high:
+        hour_filter = f"EXTRACT(HOUR FROM timestamp) BETWEEN {hour_low} AND {hour_high}"
+    else:
+        # Wraps around midnight, e.g. 23, 0, 1
+        hour_filter = f"(EXTRACT(HOUR FROM timestamp) >= {hour_low} OR EXTRACT(HOUR FROM timestamp) <= {hour_high})"
+
+    same_hour_query = text(f"""
+        SELECT
+            date_trunc('hour', timestamp) AS hour_bucket,
+            MIN({fuel_type}) AS min_price
+        FROM fuel_prices
+        WHERE timestamp >= :since
+          AND {fuel_type} IS NOT NULL
+          AND {hour_filter}
+        GROUP BY date_trunc('hour', timestamp)
+        ORDER BY min_price
+    """)
+
+    rows = db.execute(same_hour_query, {"since": seven_days_ago}).fetchall()
+
+    if len(rows) < 6:
+        # Need at least 6 same-hour data points (~2 days worth)
+        # Fall back to all-hours percentile
+        fallback_query = text(f"""
+            SELECT
+                date_trunc('hour', timestamp) AS hour_bucket,
+                MIN({fuel_type}) AS min_price
+            FROM fuel_prices
+            WHERE timestamp >= :since
+              AND {fuel_type} IS NOT NULL
+            GROUP BY date_trunc('hour', timestamp)
+            ORDER BY min_price
+        """)
+        rows = db.execute(fallback_query, {"since": seven_days_ago}).fetchall()
+
+        if len(rows) < 12:
+            insufficient["current_price"] = round(current_price, 3)
+            return insufficient
+
+    prices = [float(r.min_price) for r in rows]
+    total = len(prices)
+
+    below_or_equal = sum(1 for p in prices if p <= current_price)
+    percentile = round((below_or_equal / total) * 100, 1)
+
+    week_low = min(prices)
+    week_high = max(prices)
+    sorted_prices = sorted(prices)
+    mid = total // 2
+    week_median = sorted_prices[mid] if total % 2 == 1 else (sorted_prices[mid - 1] + sorted_prices[mid]) / 2
+
+    # --- Trend: linear regression over last 3 hours ---
+    # Get hourly min prices for the last 3 hours to compute slope.
+    three_hours_ago = now - timedelta(hours=3)
+    trend_query = text(f"""
         SELECT
             date_trunc('hour', timestamp) AS hour_bucket,
             MIN({fuel_type}) AS min_price
@@ -461,50 +532,69 @@ def get_go_now_indicator(
         WHERE timestamp >= :since
           AND {fuel_type} IS NOT NULL
         GROUP BY date_trunc('hour', timestamp)
-        ORDER BY min_price
+        ORDER BY hour_bucket
     """)
 
-    rows = db.execute(hourly_mins_query, {"since": seven_days_ago}).fetchall()
+    trend_rows = db.execute(trend_query, {"since": three_hours_ago}).fetchall()
 
-    if len(rows) < 12:
-        # Need at least 12 hours of data for meaningful percentile
-        return {
-            "current_price": round(current_price, 3),
-            "percentile": None,
-            "week_low": None,
-            "week_high": None,
-            "week_median": None,
-            "recommendation": "insufficient_data",
-        }
+    # Calculate trend using simple linear regression (cents per hour)
+    trend_cents_per_hour = 0.0
+    trend_direction = "stable"
+    if len(trend_rows) >= 2:
+        n = len(trend_rows)
+        # x = 0, 1, 2, ... (hour index), y = price
+        trend_prices = [float(r.min_price) for r in trend_rows]
+        x_mean = (n - 1) / 2.0
+        y_mean = sum(trend_prices) / n
 
-    prices = [float(r.min_price) for r in rows]
-    total = len(prices)
+        numerator = sum((i - x_mean) * (p - y_mean) for i, p in enumerate(trend_prices))
+        denominator = sum((i - x_mean) ** 2 for i in range(n))
 
-    # Count how many historical hourly-minimums are <= current price
-    below_or_equal = sum(1 for p in prices if p <= current_price)
-    percentile = round((below_or_equal / total) * 100, 1)
+        if denominator > 0:
+            slope = numerator / denominator  # euros per hour
+            trend_cents_per_hour = round(slope * 100, 2)  # convert to cents
 
-    week_low = min(prices)
-    week_high = max(prices)
-    mid = total // 2
-    week_median = prices[mid] if total % 2 == 1 else (prices[mid - 1] + prices[mid]) / 2
+            # Threshold: ±0.1 cent/hour to avoid noise
+            if trend_cents_per_hour < -0.1:
+                trend_direction = "falling"
+            elif trend_cents_per_hour > 0.1:
+                trend_direction = "rising"
+            else:
+                trend_direction = "stable"
 
-    # Determine recommendation based on percentile
-    # Lower percentile = price is closer to the week's cheapest
-    if percentile <= 15:
-        recommendation = "excellent"   # In the cheapest 15%
-    elif percentile <= 35:
-        recommendation = "good"        # In the cheapest 35%
+    # --- Combined recommendation ---
+    # Percentile buckets: cheap (<35), mid (35-65), expensive (>65)
+    # Trend: falling, stable, rising
+    if percentile <= 35:
+        # Cheap
+        if trend_direction == "falling":
+            recommendation = "excellent"  # Great price, still dropping
+        elif trend_direction == "stable":
+            recommendation = "good"       # Good price, stable
+        else:
+            recommendation = "good"       # Good price, grab it before it rises
     elif percentile <= 65:
-        recommendation = "neutral"     # Middle of the range
-    elif percentile <= 85:
-        recommendation = "wait"        # In the pricier 35%
+        # Mid-range
+        if trend_direction == "falling":
+            recommendation = "neutral"    # OK price, might improve
+        elif trend_direction == "stable":
+            recommendation = "neutral"    # Average price
+        else:
+            recommendation = "wait"       # Average but getting worse
     else:
-        recommendation = "avoid"       # In the most expensive 15%
+        # Expensive
+        if trend_direction == "falling":
+            recommendation = "wait"       # Wait, price is coming down
+        elif trend_direction == "stable":
+            recommendation = "wait"       # Expensive, wait for drop
+        else:
+            recommendation = "avoid"      # Expensive and climbing
 
     return {
         "current_price": round(current_price, 3),
         "percentile": percentile,
+        "trend": trend_cents_per_hour,
+        "trend_direction": trend_direction,
         "week_low": round(week_low, 3),
         "week_high": round(week_high, 3),
         "week_median": round(week_median, 3),
