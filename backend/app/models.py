@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Float, Boolean, DateTime, ForeignKey, Index
+from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Index
 from sqlalchemy.orm import relationship
 from sqlalchemy.types import TIMESTAMP
 from datetime import datetime, timezone
@@ -57,3 +57,19 @@ class FuelPrice(Base):
         Index("idx_price_timestamp", "timestamp"),
         Index("idx_price_station_timestamp", "station_id", "timestamp"),
     )
+
+
+class OilPrice(Base):
+    __tablename__ = "oil_prices"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    timestamp = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    price_usd_per_barrel = Column(Float, nullable=False)
+    price_eur_per_barrel = Column(Float, nullable=False)
+    price_eur_per_liter = Column(Float, nullable=False)
+
+    __table_args__ = (Index("idx_oil_price_timestamp", "timestamp"),)

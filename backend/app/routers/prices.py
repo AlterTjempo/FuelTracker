@@ -621,9 +621,13 @@ def get_top_stations(
 ):
     """Get top stations by average price and consistency"""
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
+    # Volatility is always measured over a fixed 30-day window so that the
+    # stability label is a station characteristic, not an artefact of the
+    # currently selected time range.
+    volatility_since = datetime.now(timezone.utc) - timedelta(days=30)
     fuel_column = getattr(FuelPrice, fuel_type)
 
-    # Get station statistics
+    # Get station statistics (ranking window = user-selected hours)
     station_stats = (
         db.query(
             FuelPrice.station_id,
@@ -633,7 +637,6 @@ def get_top_stations(
             func.avg(fuel_column).label("avg_price"),
             func.min(fuel_column).label("min_price"),
             func.max(fuel_column).label("max_price"),
-            func.stddev(fuel_column).label("volatility"),
             func.count(FuelPrice.id).label("data_points"),
         )
         .join(Station, FuelPrice.station_id == Station.id)
@@ -643,6 +646,18 @@ def get_top_stations(
         .limit(limit)
         .all()
     )
+
+    # Volatility subquery over fixed 30-day window
+    volatility_rows = (
+        db.query(
+            FuelPrice.station_id,
+            func.stddev(fuel_column).label("volatility"),
+        )
+        .filter(FuelPrice.timestamp >= volatility_since, fuel_column.isnot(None))
+        .group_by(FuelPrice.station_id)
+        .all()
+    )
+    volatility_map = {row.station_id: row.volatility for row in volatility_rows}
 
     # Calculate cheapest counts - simplified approach
     # Get total number of hourly samples
@@ -689,6 +704,7 @@ def get_top_stations(
             (cheapest_count / total_samples) * 100 if total_samples > 0 else 0
         )
 
+        volatility = volatility_map.get(stat.station_id) or 0
         results.append(
             {
                 "station_id": stat.station_id,
@@ -698,13 +714,58 @@ def get_top_stations(
                 "avg_price": round(float(stat.avg_price), 3),
                 "min_price": round(float(stat.min_price), 3),
                 "max_price": round(float(stat.max_price), 3),
-                "volatility": round(float(stat.volatility or 0), 4),
+                "volatility": round(float(volatility), 4),
                 "cheapest_percentage": round(cheapest_percentage, 1),
                 "data_points": stat.data_points,
             }
         )
 
     return results
+
+
+@router.get("/analytics/heatmap")
+def get_price_heatmap(
+    fuel_type: str = Query("e5", regex="^(e5|e10|diesel)$"),
+    days: int = Query(30, ge=1, le=365),
+    db: Session = Depends(get_db),
+):
+    """Return average price grouped by day-of-week (0=Mon … 6=Sun) and hour-of-day (0-23).
+
+    The result is a flat list of {day_of_week, hour_of_day, avg_price} objects
+    covering only cells that have data.  Missing cells should be treated as null
+    by the frontend.
+    """
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    fuel_column = getattr(FuelPrice, fuel_type)
+
+    # PostgreSQL: EXTRACT(DOW …) returns 0=Sunday … 6=Saturday.
+    # We remap to 0=Monday … 6=Sunday in Python.
+    rows = (
+        db.query(
+            func.extract("dow", FuelPrice.timestamp).label("dow_pg"),
+            func.extract("hour", FuelPrice.timestamp).label("hour_of_day"),
+            func.avg(fuel_column).label("avg_price"),
+        )
+        .filter(FuelPrice.timestamp >= since, fuel_column.isnot(None))
+        .group_by("dow_pg", "hour_of_day")
+        .order_by("dow_pg", "hour_of_day")
+        .all()
+    )
+
+    # Remap PostgreSQL DOW (0=Sun) → ISO (0=Mon)
+    result = []
+    for row in rows:
+        pg_dow = int(row.dow_pg)          # 0=Sun, 1=Mon, …, 6=Sat
+        iso_dow = (pg_dow + 6) % 7        # 0=Mon, …, 6=Sun
+        result.append(
+            {
+                "day_of_week": iso_dow,
+                "hour_of_day": int(row.hour_of_day),
+                "avg_price": round(float(row.avg_price), 3),
+            }
+        )
+
+    return result
 
 
 @router.get("/analytics/lowest-ever")
