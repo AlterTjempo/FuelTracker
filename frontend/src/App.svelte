@@ -5,6 +5,8 @@
   import CurrentLowestPrices from './components/CurrentLowestPrices.svelte'
   import Statistics from './components/Statistics.svelte'
   import GoNowIndicator from './components/GoNowIndicator.svelte'
+  import OilPrice from './components/OilPrice.svelte'
+  import PriceHeatmap from './components/PriceHeatmap.svelte'
   
   let selectedFuelType = 'e5'
   let selectedHours = 24
@@ -58,6 +60,12 @@
         >
           Diesel
         </button>
+        <button 
+          class:active={selectedFuelType === 'oil'} 
+          on:click={() => selectedFuelType = 'oil'}
+        >
+          Oil
+        </button>
       </div>
 
       <div class="time-selector">
@@ -77,6 +85,9 @@
       <button class:active={activeTab === 'overview'} on:click={() => activeTab = 'overview'}>
         📊 Overview
       </button>
+      <button class:active={activeTab === 'statistics'} on:click={() => activeTab = 'statistics'}>
+        📈 Statistics
+      </button>
       <button class:active={activeTab === 'leaderboard'} on:click={() => activeTab = 'leaderboard'}>
         🏆 Literboard
       </button>
@@ -86,38 +97,64 @@
     </div>
 
     {#if activeTab === 'overview'}
-      <GoNowIndicator fuelType={selectedFuelType} />
+      {#if selectedFuelType === 'oil'}
+        <OilPrice hours={selectedHours} />
+      {:else}
+        <GoNowIndicator fuelType={selectedFuelType} />
 
-      <div class="main-chart">
-        <PriceChart fuelType={selectedFuelType} hours={selectedHours} />
-      </div>
-
-      <div class="card">
-        <h2>Best Prices Now</h2>
-        <CurrentLowestPrices fuelType={selectedFuelType} />
-      </div>
-
-      <div class="grid">
-        <div class="card">
-          <h2>📊 Statistics</h2>
-          <Statistics fuelType={selectedFuelType} hours={selectedHours} />
+        <div class="main-chart">
+          <PriceChart fuelType={selectedFuelType} hours={selectedHours} />
         </div>
-        
+
         <div class="card">
-          <h2>🏆 Lowest Prices Ever</h2>
-          <LowestPrices fuelType={selectedFuelType} hours={selectedHours} />
+          <h2>Best Prices Now</h2>
+          <CurrentLowestPrices fuelType={selectedFuelType} />
         </div>
-      </div>
+      {/if}
+
+    {:else if activeTab === 'statistics'}
+      {#if selectedFuelType === 'oil'}
+        <div class="card">
+          <div class="oil-notice">📊 Statistics are not available for crude oil. <br> Switch to E5, E10, or Diesel to see station statistics.</div>
+        </div>
+      {:else}
+        <div class="grid">
+          <div class="card">
+            <h2>📊 Statistics</h2>
+            <Statistics fuelType={selectedFuelType} hours={selectedHours} />
+          </div>
+
+          <div class="card">
+            <h2>🏆 Lowest Prices Ever</h2>
+            <LowestPrices fuelType={selectedFuelType} hours={selectedHours} />
+          </div>
+        </div>
+        <div class="card">
+          <PriceHeatmap fuelType={selectedFuelType} />
+        </div>
+      {/if}
     {:else if activeTab === 'leaderboard'}
-      <div class="card">
-        <h2>🏆 Top Stations Leaderboard</h2>
-        <Statistics fuelType={selectedFuelType} hours={selectedHours} leaderboardOnly={true} />
-      </div>
+      {#if selectedFuelType === 'oil'}
+        <div class="card">
+          <div class="oil-notice">🏆 The Literboard is not available for crude oil <br> Switch to E5, E10, or Diesel to see station statistics.</div>
+        </div>
+      {:else}
+        <div class="card">
+          <h2>🏆 Top Stations Leaderboard</h2>
+          <Statistics fuelType={selectedFuelType} hours={selectedHours} leaderboardOnly={true} />
+        </div>
+      {/if}
     {:else if activeTab === 'stations'}
-      <div class="card">
-        <h2>⛽ Current Prices at All Stations</h2>
-        <CurrentPrices fuelType={selectedFuelType} />
-      </div>
+      {#if selectedFuelType === 'oil'}
+        <div class="card">
+          <div class="oil-notice">No petrol stations pump crude oil. <br> Switch to E5, E10, or Diesel to see station prices.</div>
+        </div>
+      {:else}
+        <div class="card">
+          <h2>⛽ Current Prices at All Stations</h2>
+          <CurrentPrices fuelType={selectedFuelType} />
+        </div>
+      {/if}
     {/if}
   </div>
 </main>
@@ -277,6 +314,21 @@
     border-radius: 8px;
     padding: 1rem;
     margin-bottom: 1rem;
+  }
+
+  .grid .card {
+    margin-bottom: 0;
+  }
+
+  .oil-notice {
+    padding: 1.25rem;
+    background: #1c2128;
+    border: 1px solid #30363d;
+    border-left: 3px solid #f59e0b;
+    border-radius: 6px;
+    color: #8b949e;
+    font-size: 0.9rem;
+    line-height: 1.5;
   }
 
   h2 {

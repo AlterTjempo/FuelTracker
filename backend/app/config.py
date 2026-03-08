@@ -8,6 +8,10 @@ class Settings(BaseSettings):
     TANKERKONIG_API_KEY: str
     TANKERKONIG_BASE_URL: str = "https://creativecommons.tankerkoenig.de/json"
 
+    # Optional: EIA API key for Brent crude prices.
+    # If not set, falls back to Yahoo Finance public endpoint.
+    OIL_PRICE_API_KEY: Optional[str] = None
+
     # Location settings from config.env
     LATITUDE: float = 52.52
     LONGITUDE: float = 13.405

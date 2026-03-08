@@ -5,7 +5,9 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from database import engine, Base
 from routers import stations, prices
+from routers import oil_prices
 from services.data_collector import DataCollector
+from services.oil_collector import OilCollector
 from config import settings
 
 scheduler = AsyncIOScheduler()
@@ -16,19 +18,26 @@ async def lifespan(app: FastAPI):
     # Startup: Create tables and start scheduler
     Base.metadata.create_all(bind=engine)
 
-    # Initialize data collector
+    # Initialize data collectors
     collector = DataCollector()
+    oil_collector = OilCollector()
 
-    # Fetch data every 15 minutes
+    # Fetch fuel prices every 15 minutes
     scheduler.add_job(
         collector.fetch_and_store_prices, "interval", minutes=15, id="fetch_prices"
+    )
+
+    # Fetch Brent crude oil price every hour
+    scheduler.add_job(
+        oil_collector.fetch_and_store, "interval", hours=1, id="fetch_oil_price"
     )
 
     # Start scheduler
     scheduler.start()
 
-    # Run initial fetch
+    # Run initial fetches
     await collector.fetch_and_store_prices()
+    await oil_collector.fetch_and_store()
 
     yield
 
@@ -55,6 +64,7 @@ app.add_middleware(
 # Include routers
 app.include_router(stations.router, prefix="/api/stations", tags=["stations"])
 app.include_router(prices.router, prefix="/api/prices", tags=["prices"])
+app.include_router(oil_prices.router, prefix="/api/oil-prices", tags=["oil-prices"])
 
 
 @app.get("/")

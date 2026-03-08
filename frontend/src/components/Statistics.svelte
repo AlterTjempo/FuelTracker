@@ -230,6 +230,7 @@
         {/if}
       </div>
     {/if}
+
   {/if}
 </div>
 
@@ -237,7 +238,7 @@
   .statistics {
     min-height: 150px;
   }
-  
+
   .stat-grid {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
