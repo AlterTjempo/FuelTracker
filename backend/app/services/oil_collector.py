@@ -29,11 +29,7 @@ class OilCollector:
                 response = await client.get(BRENT_URL, headers=headers)
                 response.raise_for_status()
                 data = response.json()
-                meta = (
-                    data.get("chart", {})
-                    .get("result", [{}])[0]
-                    .get("meta", {})
-                )
+                meta = data.get("chart", {}).get("result", [{}])[0].get("meta", {})
                 price = meta.get("regularMarketPrice")
                 return float(price) if price is not None else None
             except Exception as exc:

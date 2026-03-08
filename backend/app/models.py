@@ -1,4 +1,13 @@
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Index
+from sqlalchemy import (
+    Column,
+    Integer,
+    String,
+    Float,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+)
 from sqlalchemy.orm import relationship
 from sqlalchemy.types import TIMESTAMP
 from datetime import datetime, timezone

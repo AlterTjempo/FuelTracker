@@ -755,8 +755,8 @@ def get_price_heatmap(
     # Remap PostgreSQL DOW (0=Sun) → ISO (0=Mon)
     result = []
     for row in rows:
-        pg_dow = int(row.dow_pg)          # 0=Sun, 1=Mon, …, 6=Sat
-        iso_dow = (pg_dow + 6) % 7        # 0=Mon, …, 6=Sun
+        pg_dow = int(row.dow_pg)  # 0=Sun, 1=Mon, …, 6=Sat
+        iso_dow = (pg_dow + 6) % 7  # 0=Mon, …, 6=Sun
         result.append(
             {
                 "day_of_week": iso_dow,
