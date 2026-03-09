@@ -82,3 +82,24 @@ class OilPrice(Base):
     price_eur_per_liter = Column(Float, nullable=False)
 
     __table_args__ = (Index("idx_oil_price_timestamp", "timestamp"),)
+
+
+class EnergyNews(Base):
+    __tablename__ = "energy_news"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    title = Column(String, nullable=False)
+    link = Column(String, nullable=False, unique=True)
+    source = Column(String, nullable=False)
+    published_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    summary = Column(String, nullable=True)
+    fetched_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        Index("idx_energy_news_published_at", "published_at"),
+        Index("idx_energy_news_link", "link"),
+    )

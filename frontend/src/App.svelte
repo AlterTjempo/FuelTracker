@@ -125,7 +125,7 @@
           </div>
 
           <div class="card">
-            <h2>🏆 Lowest Prices Ever</h2>
+            <h2>🏆 Lowest Prices Today</h2>
             <LowestPrices fuelType={selectedFuelType} hours={selectedHours} />
           </div>
         </div>
