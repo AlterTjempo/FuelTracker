@@ -2,9 +2,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
+
+from limiter import limiter
 
 from database import engine, Base
 from routers import stations, prices
@@ -16,15 +17,6 @@ from services.news_collector import NewsCollector
 from config import settings
 
 scheduler = AsyncIOScheduler()
-
-# Rate limiter — uses client IP via X-Forwarded-For (behind NGINX proxy).
-# Default: 120 requests/minute — generous for normal browsing.
-# Heavy analytics endpoints get stricter per-route limits.
-limiter = Limiter(
-    key_func=get_remote_address,
-    default_limits=["120/minute"],
-    storage_uri="memory://",
-)
 
 
 @asynccontextmanager

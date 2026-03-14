@@ -45,9 +45,13 @@ def get_stations(
     query = db.query(Station)
 
     if brand:
-        query = query.filter(Station.brand.ilike(f"%{_sanitize_like(brand)}%"))
+        query = query.filter(
+            Station.brand.ilike(f"%{_sanitize_like(brand)}%", escape="\\")
+        )
     if city:
-        query = query.filter(Station.city.ilike(f"%{_sanitize_like(city)}%"))
+        query = query.filter(
+            Station.city.ilike(f"%{_sanitize_like(city)}%", escape="\\")
+        )
 
     stations = query.offset(offset).limit(limit).all()
     return stations

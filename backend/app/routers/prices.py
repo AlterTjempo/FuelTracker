@@ -4,17 +4,12 @@ from sqlalchemy import func, and_
 from typing import List, Optional
 from pydantic import BaseModel
 from datetime import datetime, timedelta, timezone
-from slowapi import Limiter
-from slowapi.util import get_remote_address
+from limiter import limiter
 
 from database import get_db
 from models import FuelPrice, Station
 
 router = APIRouter()
-
-# Rate limiter instance (shared with main app via state, but we need a
-# reference here to use the @limiter.limit decorator on routes).
-limiter = Limiter(key_func=get_remote_address)
 
 # Whitelist mapping for fuel type → ORM column.
 # Prevents SQL injection and unsafe getattr on arbitrary attributes.
