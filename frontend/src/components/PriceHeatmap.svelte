@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte'
-  import API_BASE from '../lib/api.js'
+  import API_BASE, { safeFetch } from '../lib/api.js'
 
   export let fuelType = 'e5'
 
@@ -19,8 +19,8 @@
     loading = true
     noData = false
     try {
-      const res = await fetch(`${API_BASE}/prices/analytics/heatmap?fuel_type=${fuelType}&days=30`)
-      rawData = await res.json()
+      const res = await safeFetch(`${API_BASE}/prices/analytics/heatmap?fuel_type=${encodeURIComponent(fuelType)}&days=30`)
+      rawData = res
 
       if (!rawData.length) { noData = true; loading = false; return }
 

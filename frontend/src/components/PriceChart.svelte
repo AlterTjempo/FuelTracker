@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from 'svelte'
   import { Chart, registerables } from 'chart.js'
   import { format } from 'date-fns'
-  import API_BASE from '../lib/api.js'
+  import API_BASE, { safeFetch } from '../lib/api.js'
   
   Chart.register(...registerables)
   
@@ -17,12 +17,8 @@
   async function fetchData() {
     try {
       loading = true
-      const response = await fetch(`${API_BASE}/prices/history/all?fuel_type=${fuelType}&hours=${hours}`)
-      if (!response.ok) {
-        throw new Error(`API error: ${response.status} ${response.statusText}`)
-      }
-      const result = await response.json()
-      data = result
+      const result = await safeFetch(`${API_BASE}/prices/history/all?fuel_type=${encodeURIComponent(fuelType)}&hours=${hours}`)
+      data = Array.isArray(result) ? result : []
       loading = false
     } catch (error) {
       console.error('Error fetching data:', error)
