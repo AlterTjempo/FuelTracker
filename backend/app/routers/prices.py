@@ -1,14 +1,36 @@
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_
 from typing import List, Optional
 from pydantic import BaseModel
 from datetime import datetime, timedelta, timezone
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from database import get_db
 from models import FuelPrice, Station
 
 router = APIRouter()
+
+# Rate limiter instance (shared with main app via state, but we need a
+# reference here to use the @limiter.limit decorator on routes).
+limiter = Limiter(key_func=get_remote_address)
+
+# Whitelist mapping for fuel type → ORM column.
+# Prevents SQL injection and unsafe getattr on arbitrary attributes.
+FUEL_COLUMNS = {
+    "e5": FuelPrice.e5,
+    "e10": FuelPrice.e10,
+    "diesel": FuelPrice.diesel,
+}
+
+
+def _get_fuel_column(fuel_type: str):
+    """Return the validated ORM column for the given fuel type."""
+    col = FUEL_COLUMNS.get(fuel_type)
+    if col is None:
+        raise HTTPException(status_code=400, detail="Invalid fuel type")
+    return col
 
 
 class PriceResponse(BaseModel):
@@ -55,7 +77,7 @@ class PriceStatsResponse(BaseModel):
 
 @router.get("/current", response_model=List[CurrentPriceResponse])
 def get_current_prices(
-    fuel_type: Optional[str] = Query(None, regex="^(e5|e10|diesel)$"),
+    fuel_type: Optional[str] = Query(None, pattern="^(e5|e10|diesel)$"),
     limit: int = Query(50, ge=1, le=500),
     db: Session = Depends(get_db),
 ):
@@ -105,13 +127,12 @@ def get_current_prices(
 
 @router.get("/current-lowest", response_model=List[LowestPriceResponse])
 def get_current_lowest_prices(
-    fuel_type: str = Query("diesel", regex="^(e5|e10|diesel)$"),
+    fuel_type: str = Query("diesel", pattern="^(e5|e10|diesel)$"),
     limit: int = Query(5, ge=1, le=20),
     db: Session = Depends(get_db),
 ):
     """Get the current lowest fuel prices (from the latest data available for each station)"""
-    # Get the fuel type column
-    fuel_column = getattr(FuelPrice, fuel_type)
+    fuel_column = _get_fuel_column(fuel_type)
 
     # Subquery to get the latest timestamp for each station
     subquery = (
@@ -166,7 +187,7 @@ def get_current_lowest_prices(
 
 @router.get("/lowest", response_model=List[LowestPriceResponse])
 def get_lowest_prices(
-    fuel_type: str = Query("diesel", regex="^(e5|e10|diesel)$"),
+    fuel_type: str = Query("diesel", pattern="^(e5|e10|diesel)$"),
     limit: int = Query(10, ge=1, le=50),
     hours: int = Query(24, ge=1, le=1000000),
     db: Session = Depends(get_db),
@@ -174,8 +195,7 @@ def get_lowest_prices(
     """Get the lowest fuel prices in the specified timeframe"""
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
 
-    # Get the fuel type column
-    fuel_column = getattr(FuelPrice, fuel_type)
+    fuel_column = _get_fuel_column(fuel_type)
 
     # Query for lowest prices
     query = (
@@ -249,7 +269,7 @@ def get_station_stats(
     stats = []
 
     for fuel_type in ["e5", "e10", "diesel"]:
-        fuel_column = getattr(FuelPrice, fuel_type)
+        fuel_column = _get_fuel_column(fuel_type)
 
         result = (
             db.query(
@@ -288,14 +308,16 @@ def get_station_stats(
 
 
 @router.get("/history/all")
+@limiter.limit("60/minute")
 def get_all_prices_history(
-    fuel_type: str = Query("diesel", regex="^(e5|e10|diesel)$"),
+    request: Request,
+    fuel_type: str = Query("diesel", pattern="^(e5|e10|diesel)$"),
     hours: int = Query(24, ge=1, le=1000000),
     db: Session = Depends(get_db),
 ):
     """Get average price history across all stations for graphing"""
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
-    fuel_column = getattr(FuelPrice, fuel_type)
+    fuel_column = _get_fuel_column(fuel_type)
 
     # Group by hourly intervals
     results = (
@@ -325,14 +347,16 @@ def get_all_prices_history(
 
 
 @router.get("/analytics/time-patterns")
+@limiter.limit("30/minute")
 def get_time_patterns(
-    fuel_type: str = Query("e5", regex="^(e5|e10|diesel)$"),
+    request: Request,
+    fuel_type: str = Query("e5", pattern="^(e5|e10|diesel)$"),
     hours: int = Query(168, ge=24, le=1000000),
     db: Session = Depends(get_db),
 ):
     """Get cheapest day and time patterns"""
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
-    fuel_column = getattr(FuelPrice, fuel_type)
+    fuel_column = _get_fuel_column(fuel_type)
 
     # Check if we have enough data (at least 7 unique days for day patterns)
     unique_days = (
@@ -411,8 +435,10 @@ def get_time_patterns(
 
 
 @router.get("/analytics/go-now")
+@limiter.limit("30/minute")
 def get_go_now_indicator(
-    fuel_type: str = Query("e5", regex="^(e5|e10|diesel)$"),
+    request: Request,
+    fuel_type: str = Query("e5", pattern="^(e5|e10|diesel)$"),
     db: Session = Depends(get_db),
 ):
     """Smart refuel indicator using same-hour-of-day percentile + trend.
@@ -432,9 +458,7 @@ def get_go_now_indicator(
       expensive + fall => wait      - Wait, price is coming down
       expensive + rise => avoid     - Expensive and climbing
     """
-    from sqlalchemy import text
-
-    fuel_column = getattr(FuelPrice, fuel_type)
+    fuel_column = _get_fuel_column(fuel_type)
     now = datetime.now(timezone.utc)
 
     # --- Current best price (lowest among all stations, last hour) ---
@@ -469,45 +493,49 @@ def get_go_now_indicator(
     hour_low = (current_hour - 1) % 24
     hour_high = (current_hour + 1) % 24
 
-    # Build hour filter that handles wraparound (e.g. hour 23, 0, 1)
+    # Build hour filter using ORM (safe — no raw SQL interpolation)
+    hour_expr = func.extract("hour", FuelPrice.timestamp)
     if hour_low < hour_high:
-        hour_filter = f"EXTRACT(HOUR FROM timestamp) BETWEEN {hour_low} AND {hour_high}"
+        hour_condition = and_(hour_expr >= hour_low, hour_expr <= hour_high)
     else:
         # Wraps around midnight, e.g. 23, 0, 1
-        hour_filter = f"(EXTRACT(HOUR FROM timestamp) >= {hour_low} OR EXTRACT(HOUR FROM timestamp) <= {hour_high})"
+        hour_condition = (hour_expr >= hour_low) | (hour_expr <= hour_high)
 
-    same_hour_query = text(
-        f"""
-        SELECT
-            date_trunc('hour', timestamp) AS hour_bucket,
-            MIN({fuel_type}) AS min_price
-        FROM fuel_prices
-        WHERE timestamp >= :since
-          AND {fuel_type} IS NOT NULL
-          AND {hour_filter}
-        GROUP BY date_trunc('hour', timestamp)
-        ORDER BY min_price
-    """
+    # Same-hour ORM query
+    hour_bucket = func.date_trunc("hour", FuelPrice.timestamp).label("hour_bucket")
+    same_hour_rows = (
+        db.query(
+            hour_bucket,
+            func.min(fuel_column).label("min_price"),
+        )
+        .filter(
+            FuelPrice.timestamp >= seven_days_ago,
+            fuel_column.isnot(None),
+            hour_condition,
+        )
+        .group_by(hour_bucket)
+        .order_by(func.min(fuel_column))
+        .all()
     )
 
-    rows = db.execute(same_hour_query, {"since": seven_days_ago}).fetchall()
-
+    rows = same_hour_rows
     if len(rows) < 6:
         # Need at least 6 same-hour data points (~2 days worth)
         # Fall back to all-hours percentile
-        fallback_query = text(
-            f"""
-            SELECT
-                date_trunc('hour', timestamp) AS hour_bucket,
-                MIN({fuel_type}) AS min_price
-            FROM fuel_prices
-            WHERE timestamp >= :since
-              AND {fuel_type} IS NOT NULL
-            GROUP BY date_trunc('hour', timestamp)
-            ORDER BY min_price
-        """
+        fallback_rows = (
+            db.query(
+                hour_bucket,
+                func.min(fuel_column).label("min_price"),
+            )
+            .filter(
+                FuelPrice.timestamp >= seven_days_ago,
+                fuel_column.isnot(None),
+            )
+            .group_by(hour_bucket)
+            .order_by(func.min(fuel_column))
+            .all()
         )
-        rows = db.execute(fallback_query, {"since": seven_days_ago}).fetchall()
+        rows = fallback_rows
 
         if len(rows) < 12:
             insufficient["current_price"] = round(current_price, 3)
@@ -532,20 +560,20 @@ def get_go_now_indicator(
     # --- Trend: linear regression over last 3 hours ---
     # Get hourly min prices for the last 3 hours to compute slope.
     three_hours_ago = now - timedelta(hours=3)
-    trend_query = text(
-        f"""
-        SELECT
-            date_trunc('hour', timestamp) AS hour_bucket,
-            MIN({fuel_type}) AS min_price
-        FROM fuel_prices
-        WHERE timestamp >= :since
-          AND {fuel_type} IS NOT NULL
-        GROUP BY date_trunc('hour', timestamp)
-        ORDER BY hour_bucket
-    """
+    trend_bucket = func.date_trunc("hour", FuelPrice.timestamp).label("hour_bucket")
+    trend_rows = (
+        db.query(
+            trend_bucket,
+            func.min(fuel_column).label("min_price"),
+        )
+        .filter(
+            FuelPrice.timestamp >= three_hours_ago,
+            fuel_column.isnot(None),
+        )
+        .group_by(trend_bucket)
+        .order_by(trend_bucket)
+        .all()
     )
-
-    trend_rows = db.execute(trend_query, {"since": three_hours_ago}).fetchall()
 
     # Calculate trend using simple linear regression (cents per hour)
     trend_cents_per_hour = 0.0
@@ -613,8 +641,10 @@ def get_go_now_indicator(
 
 
 @router.get("/analytics/top-stations")
+@limiter.limit("30/minute")
 def get_top_stations(
-    fuel_type: str = Query("e5", regex="^(e5|e10|diesel)$"),
+    request: Request,
+    fuel_type: str = Query("e5", pattern="^(e5|e10|diesel)$"),
     hours: int = Query(168, ge=24, le=1000000),
     limit: int = Query(3, ge=1, le=10),
     db: Session = Depends(get_db),
@@ -625,7 +655,7 @@ def get_top_stations(
     # stability label is a station characteristic, not an artefact of the
     # currently selected time range.
     volatility_since = datetime.now(timezone.utc) - timedelta(days=30)
-    fuel_column = getattr(FuelPrice, fuel_type)
+    fuel_column = _get_fuel_column(fuel_type)
 
     # Get station statistics (ranking window = user-selected hours)
     station_stats = (
@@ -724,8 +754,10 @@ def get_top_stations(
 
 
 @router.get("/analytics/heatmap")
+@limiter.limit("30/minute")
 def get_price_heatmap(
-    fuel_type: str = Query("e5", regex="^(e5|e10|diesel)$"),
+    request: Request,
+    fuel_type: str = Query("e5", pattern="^(e5|e10|diesel)$"),
     days: int = Query(30, ge=1, le=365),
     db: Session = Depends(get_db),
 ):
@@ -736,7 +768,7 @@ def get_price_heatmap(
     by the frontend.
     """
     since = datetime.now(timezone.utc) - timedelta(days=days)
-    fuel_column = getattr(FuelPrice, fuel_type)
+    fuel_column = _get_fuel_column(fuel_type)
 
     # PostgreSQL: EXTRACT(DOW …) returns 0=Sunday … 6=Saturday.
     # We remap to 0=Monday … 6=Sunday in Python.
@@ -769,12 +801,14 @@ def get_price_heatmap(
 
 
 @router.get("/analytics/lowest-ever")
+@limiter.limit("30/minute")
 def get_lowest_price_ever(
-    fuel_type: str = Query("e5", regex="^(e5|e10|diesel)$"),
+    request: Request,
+    fuel_type: str = Query("e5", pattern="^(e5|e10|diesel)$"),
     db: Session = Depends(get_db),
 ):
     """Get the lowest price ever recorded with station and timestamp"""
-    fuel_column = getattr(FuelPrice, fuel_type)
+    fuel_column = _get_fuel_column(fuel_type)
 
     # Find the record with the absolute minimum price
     result = (
@@ -795,7 +829,12 @@ def get_lowest_price_ever(
         }
 
     price_record, station = result
-    price_value = getattr(price_record, fuel_type)
+    # fuel_type is already validated by _get_fuel_column above; use a dict
+    # lookup on the known columns to avoid getattr on arbitrary attributes.
+    price_map = {"e5": price_record.e5, "e10": price_record.e10, "diesel": price_record.diesel}
+    price_value = price_map.get(fuel_type)
+    if price_value is None:
+        raise HTTPException(status_code=404, detail="No price data found")
 
     return {
         "price": round(float(price_value), 3),

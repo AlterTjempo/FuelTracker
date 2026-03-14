@@ -2,6 +2,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 from database import engine, Base
 from routers import stations, prices
@@ -13,6 +16,15 @@ from services.news_collector import NewsCollector
 from config import settings
 
 scheduler = AsyncIOScheduler()
+
+# Rate limiter — uses client IP via X-Forwarded-For (behind NGINX proxy).
+# Default: 120 requests/minute — generous for normal browsing.
+# Heavy analytics endpoints get stricter per-route limits.
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=["120/minute"],
+    storage_uri="memory://",
+)
 
 
 @asynccontextmanager
@@ -59,14 +71,21 @@ app = FastAPI(
     description="Track and analyze fuel prices from Tankerkonig",
     version="1.0.0",
     lifespan=lifespan,
+    # Don't expose docs in production unless explicitly enabled
+    docs_url="/docs" if settings.ENABLE_DOCS else None,
+    redoc_url="/redoc" if settings.ENABLE_DOCS else None,
 )
 
-# CORS middleware for Svelte frontend
+# Attach rate limiter to the app
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# CORS middleware — restrict origins in production
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.get_allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET"],  # This API is read-only
     allow_headers=["*"],
 )
 

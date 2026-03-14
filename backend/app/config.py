@@ -17,8 +17,11 @@ class Settings(BaseSettings):
     LONGITUDE: float = 13.405
     RANGE: float = 10.0  # km
 
-    # CORS Settings
-    ALLOWED_ORIGINS: str = "*"
+    # CORS Settings — default to restrictive; override in config.env
+    ALLOWED_ORIGINS: str = "http://localhost:5173"
+
+    # Enable /docs and /redoc endpoints (disable in production)
+    ENABLE_DOCS: bool = True
 
     @property
     def get_allowed_origins(self) -> List[str]:

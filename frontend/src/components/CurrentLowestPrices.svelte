@@ -1,11 +1,12 @@
 <script>
   import { onMount } from 'svelte'
-  import API_BASE from '../lib/api.js'
+  import API_BASE, { safeFetch } from '../lib/api.js'
   
   export let fuelType = 'e5'
   
   let lowestPrices = []
   let loading = true
+  let error = null
   
   function getGoogleMapsUrl(station) {
     if (!station || !station.station_name) return '#'
@@ -31,11 +32,14 @@
   
   async function fetchCurrentLowest() {
     try {
-      const response = await fetch(`${API_BASE}/prices/current-lowest?fuel_type=${fuelType}&limit=5`)
-      lowestPrices = await response.json()
+      error = null
+      const data = await safeFetch(`${API_BASE}/prices/current-lowest?fuel_type=${encodeURIComponent(fuelType)}&limit=5`)
+      if (!Array.isArray(data)) throw new Error('Unexpected response format')
+      lowestPrices = data
       loading = false
-    } catch (error) {
-      console.error('Error fetching current lowest prices:', error)
+    } catch (err) {
+      console.error('Error fetching current lowest prices:', err)
+      error = err.message
       loading = false
     }
   }

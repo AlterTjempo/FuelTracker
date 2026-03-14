@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from 'svelte'
   import { Chart, registerables } from 'chart.js'
   import { format } from 'date-fns'
-  import API_BASE from '../lib/api.js'
+  import API_BASE, { safeFetch } from '../lib/api.js'
 
   Chart.register(...registerables)
 
@@ -29,9 +29,7 @@
 
   async function fetchOilPrice() {
     try {
-      const res = await fetch(`${API_BASE}/oil-prices/latest`)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      data = await res.json()
+      data = await safeFetch(`${API_BASE}/oil-prices/latest`)
       error = false
     } catch (e) {
       console.error('Error fetching oil price:', e)
@@ -44,9 +42,7 @@
   async function fetchHistory() {
     try {
       historyLoading = true
-      const res = await fetch(`${API_BASE}/oil-prices/history?hours=${hours}`)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      historyData = await res.json()
+      historyData = await safeFetch(`${API_BASE}/oil-prices/history?hours=${hours}`)
     } catch (e) {
       console.error('Error fetching oil history:', e)
       historyData = []
@@ -180,6 +176,7 @@
       )
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const batch = await res.json()
+      if (!Array.isArray(batch)) throw new Error('Unexpected response format')
       newsItems = [...newsItems, ...batch]
       newsOffset += batch.length
       newsHasMore = batch.length === LOAD_MORE_STEP
