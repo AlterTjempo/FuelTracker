@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte'
-  import API_BASE from '../lib/api.js'
+  import API_BASE, { safeFetch } from '../lib/api.js'
   
   export let fuelType = 'e5'
   export let hours = 24
@@ -17,13 +17,13 @@
   
   async function fetchLowest() {
     try {
-      const response = await fetch(`${API_BASE}/prices/lowest?fuel_type=${fuelType}&hours=${hours}&limit=5`)
-      lowestPrices = await response.json()
+      const data = await safeFetch(`${API_BASE}/prices/lowest?fuel_type=${encodeURIComponent(fuelType)}&hours=${hours}&limit=5`)
+      if (!Array.isArray(data)) throw new Error('Unexpected response format')
+      lowestPrices = data
       
       // Fetch full station details for the cheapest one
       if (lowestPrices.length > 0) {
-        const stationResponse = await fetch(`${API_BASE}/stations/${lowestPrices[0].station_id}`)
-        const stationData = await stationResponse.json()
+        const stationData = await safeFetch(`${API_BASE}/stations/${encodeURIComponent(lowestPrices[0].station_id)}`)
         stations = [stationData]
       }
       

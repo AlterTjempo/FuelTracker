@@ -4,21 +4,16 @@ and set all existing timestamps to UTC timezone
 """
 
 import psycopg2
+from urllib.parse import urlparse
 from config import settings
 
-# Parse DATABASE_URL
-# Format: postgresql://user:password@host:port/dbname
-db_url = settings.DATABASE_URL.replace("postgresql://", "")
-parts = db_url.split("@")
-user_pass = parts[0].split(":")
-host_port_db = parts[1].split("/")
-host_port = host_port_db[0].split(":")
-
-user = user_pass[0]
-password = user_pass[1]
-host = host_port[0]
-port = host_port[1] if len(host_port) > 1 else "5432"
-dbname = host_port_db[1]
+# Parse DATABASE_URL safely (handles passwords with special characters)
+parsed = urlparse(settings.DATABASE_URL)
+user = parsed.username
+password = parsed.password
+host = parsed.hostname
+port = parsed.port or 5432
+dbname = parsed.path.lstrip("/")
 
 print(f"Connecting to database: {host}:{port}/{dbname}")
 

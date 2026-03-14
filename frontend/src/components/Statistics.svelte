@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte'
-  import API_BASE from '../lib/api.js'
+  import API_BASE, { safeFetch } from '../lib/api.js'
   
   export let fuelType = 'e5'
   export let hours = 24
@@ -18,10 +18,9 @@
     try {
       if (!leaderboardOnly) {
         // Fetch basic stats
-        const response = await fetch(`${API_BASE}/prices/history/all?fuel_type=${fuelType}&hours=${hours}`)
-        const data = await response.json()
+        const data = await safeFetch(`${API_BASE}/prices/history/all?fuel_type=${encodeURIComponent(fuelType)}&hours=${hours}`)
         
-        if (data.length > 0) {
+        if (Array.isArray(data) && data.length > 0) {
           const prices = data.map(d => d.avg_price).filter(p => p !== null)
           avgPrice = prices.reduce((a, b) => a + b, 0) / prices.length
           minPrice = Math.min(...data.map(d => d.min_price).filter(p => p !== null))
@@ -29,17 +28,14 @@
         }
         
         // Fetch time patterns (always use 168 hours = 7 days for pattern analysis)
-        const patternsResponse = await fetch(`${API_BASE}/prices/analytics/time-patterns?fuel_type=${fuelType}&hours=168`)
-        timePatterns = await patternsResponse.json()
+        timePatterns = await safeFetch(`${API_BASE}/prices/analytics/time-patterns?fuel_type=${encodeURIComponent(fuelType)}&hours=168`)
         
         // Fetch lowest ever
-        const lowestResponse = await fetch(`${API_BASE}/prices/analytics/lowest-ever?fuel_type=${fuelType}`)
-        lowestEver = await lowestResponse.json()
+        lowestEver = await safeFetch(`${API_BASE}/prices/analytics/lowest-ever?fuel_type=${encodeURIComponent(fuelType)}`)
       }
       
       // Fetch top stations (always, for leaderboard)
-      const stationsResponse = await fetch(`${API_BASE}/prices/analytics/top-stations?fuel_type=${fuelType}&hours=${hours}&limit=${leaderboardOnly ? 10 : 3}`)
-      topStations = await stationsResponse.json()
+      topStations = await safeFetch(`${API_BASE}/prices/analytics/top-stations?fuel_type=${encodeURIComponent(fuelType)}&hours=${hours}&limit=${leaderboardOnly ? 10 : 3}`)
       
       loading = false
     } catch (error) {
