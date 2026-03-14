@@ -831,7 +831,11 @@ def get_lowest_price_ever(
     price_record, station = result
     # fuel_type is already validated by _get_fuel_column above; use a dict
     # lookup on the known columns to avoid getattr on arbitrary attributes.
-    price_map = {"e5": price_record.e5, "e10": price_record.e10, "diesel": price_record.diesel}
+    price_map = {
+        "e5": price_record.e5,
+        "e10": price_record.e10,
+        "diesel": price_record.diesel,
+    }
     price_value = price_map.get(fuel_type)
     if price_value is None:
         raise HTTPException(status_code=404, detail="No price data found")

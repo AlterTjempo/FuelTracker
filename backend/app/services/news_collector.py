@@ -108,9 +108,7 @@ def _extract_body(html: str, selectors: list[str]) -> str | None:
     soup = BeautifulSoup(html, "html.parser")
 
     # Remove boilerplate nodes
-    for tag in soup(
-        ["script", "style", "nav", "header", "footer", "aside", "figure"]
-    ):
+    for tag in soup(["script", "style", "nav", "header", "footer", "aside", "figure"]):
         tag.decompose()
 
     for selector in selectors:
@@ -210,9 +208,7 @@ class NewsCollector:
                     needs_scrape = article.pop("_needs_scrape", False)
                     if needs_scrape:
                         await asyncio.sleep(_SCRAPE_DELAY)
-                        scraped = await self._scrape_article(
-                            article["link"], selectors
-                        )
+                        scraped = await self._scrape_article(article["link"], selectors)
                         if scraped and not _is_truncated(scraped):
                             article["summary"] = scraped
 
