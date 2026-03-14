@@ -1,5 +1,5 @@
 <script>
-  import API_BASE from '../lib/api.js'
+  import API_BASE, { safeFetch } from '../lib/api.js'
   
   export let fuelType = 'e5'
   
@@ -8,8 +8,7 @@
   
   async function fetchIndicator() {
     try {
-      const response = await fetch(`${API_BASE}/prices/analytics/go-now?fuel_type=${fuelType}`)
-      indicator = await response.json()
+      indicator = await safeFetch(`${API_BASE}/prices/analytics/go-now?fuel_type=${encodeURIComponent(fuelType)}`)
       loading = false
     } catch (error) {
       console.error('Error fetching indicator:', error)

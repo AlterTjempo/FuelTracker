@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte'
-  import API_BASE from '../lib/api.js'
+  import API_BASE, { safeFetch } from '../lib/api.js'
   
   export let fuelType = 'e5'
   
@@ -10,8 +10,8 @@
   
   async function fetchStations() {
     try {
-      const response = await fetch(`${API_BASE}/prices/current?limit=100`)
-      const data = await response.json()
+      const data = await safeFetch(`${API_BASE}/prices/current?limit=100`)
+      if (!Array.isArray(data)) throw new Error('Unexpected response format')
       stations = data.filter(s => s[fuelType] !== null && s.latitude && s.longitude)
       loading = false
       initMap()

@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from 'svelte'
   import { Chart, registerables } from 'chart.js'
   import { format } from 'date-fns'
-  import API_BASE from '../lib/api.js'
+  import API_BASE, { safeFetch } from '../lib/api.js'
 
   Chart.register(...registerables)
 
@@ -29,9 +29,7 @@
 
   async function fetchOilPrice() {
     try {
-      const res = await fetch(`${API_BASE}/oil-prices/latest`)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      data = await res.json()
+      data = await safeFetch(`${API_BASE}/oil-prices/latest`)
       error = false
     } catch (e) {
       console.error('Error fetching oil price:', e)
@@ -44,9 +42,7 @@
   async function fetchHistory() {
     try {
       historyLoading = true
-      const res = await fetch(`${API_BASE}/oil-prices/history?hours=${hours}`)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      historyData = await res.json()
+      historyData = await safeFetch(`${API_BASE}/oil-prices/history?hours=${hours}`)
     } catch (e) {
       console.error('Error fetching oil history:', e)
       historyData = []
@@ -143,11 +139,63 @@
     })
   }
 
+  // ── Energy News ───────────────────────────────────────────────────────────
+  const INITIAL_LIMIT = 5
+  const LOAD_MORE_STEP = 5
+
+  let newsItems = []
+  let newsLoading = true
+  let newsOffset = 0
+  let newsHasMore = true
+  let newsLoadingMore = false
+
+  function timeAgo(dateStr) {
+    if (!dateStr) return ''
+    const diff = Date.now() - new Date(dateStr).getTime()
+    const mins = Math.floor(diff / 60_000)
+    if (mins < 1) return 'just now'
+    if (mins < 60) return `${mins} minute${mins === 1 ? '' : 's'} ago`
+    const hrs = Math.floor(mins / 60)
+    if (hrs < 24) return `${hrs} hour${hrs === 1 ? '' : 's'} ago`
+    const days = Math.floor(hrs / 24)
+    return `${days} day${days === 1 ? '' : 's'} ago`
+  }
+
+  async function fetchNews(reset = false) {
+    if (reset) {
+      newsOffset = 0
+      newsItems = []
+      newsHasMore = true
+      newsLoading = true
+    } else {
+      newsLoadingMore = true
+    }
+    try {
+      const res = await fetch(
+        `${API_BASE}/energy-news/latest?limit=${LOAD_MORE_STEP}&offset=${newsOffset}`
+      )
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const batch = await res.json()
+      if (!Array.isArray(batch)) throw new Error('Unexpected response format')
+      newsItems = [...newsItems, ...batch]
+      newsOffset += batch.length
+      newsHasMore = batch.length === LOAD_MORE_STEP
+    } catch (e) {
+      console.error('Error fetching energy news:', e)
+    } finally {
+      newsLoading = false
+      newsLoadingMore = false
+    }
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
   onMount(() => {
     fetchOilPrice()
     fetchHistory()
+    fetchNews(true)
     const interval = setInterval(() => { fetchOilPrice(); fetchHistory() }, 15 * 60 * 1000)
-    return () => clearInterval(interval)
+    const newsInterval = setInterval(() => fetchNews(true), 60 * 60 * 1000)
+    return () => { clearInterval(interval); clearInterval(newsInterval) }
   })
 
   onDestroy(() => { if (chart) chart.destroy() })
@@ -200,6 +248,44 @@
     <div class="chart-placeholder">No history data yet.</div>
   {:else}
     <canvas bind:this={chartCanvas}></canvas>
+  {/if}
+</div>
+
+<div class="energy-news">
+  <div class="news-header">
+    <span class="news-icon">📰</span>
+    <span class="news-title">Energy News</span>
+  </div>
+
+  {#if newsLoading}
+    <div class="news-placeholder">Loading news…</div>
+  {:else if newsItems.length === 0}
+    <div class="news-placeholder">No news articles yet.</div>
+  {:else}
+    <ul class="news-list">
+      {#each newsItems as item (item.id)}
+        <li class="news-item">
+          <a class="news-link" href={item.link} target="_blank" rel="noopener noreferrer">
+            {item.title}
+          </a>
+          <div class="news-meta">
+            <span class="news-source">{item.source}</span>
+            <span class="news-sep">•</span>
+            <span class="news-time">{timeAgo(item.published_at || item.fetched_at)}</span>
+          </div>
+        </li>
+      {/each}
+    </ul>
+
+    {#if newsHasMore}
+      <button
+        class="load-more"
+        on:click={() => fetchNews(false)}
+        disabled={newsLoadingMore}
+      >
+        {newsLoadingMore ? 'Loading…' : 'Load more'}
+      </button>
+    {/if}
   {/if}
 </div>
 
@@ -314,5 +400,111 @@
   @media (min-width: 1024px) {
     .main-chart { height: 400px; }
     .main-chart canvas { max-height: 400px; }
+  }
+
+  /* ── Energy News ── */
+  .energy-news {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1rem;
+  }
+
+  .news-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.875rem;
+  }
+
+  .news-icon {
+    font-size: 1.1rem;
+  }
+
+  .news-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #e6edf3;
+  }
+
+  .news-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .news-item {
+    padding: 0.65rem 0;
+    border-bottom: 1px solid #21262d;
+  }
+
+  .news-item:last-child {
+    border-bottom: none;
+  }
+
+  .news-link {
+    display: block;
+    color: #e6edf3;
+    font-size: 0.9rem;
+    font-weight: 500;
+    line-height: 1.4;
+    text-decoration: none;
+    margin-bottom: 0.3rem;
+    transition: color 0.15s;
+  }
+
+  .news-link:hover {
+    color: #58a6ff;
+  }
+
+  .news-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.72rem;
+    color: #8b949e;
+  }
+
+  .news-source {
+    color: #f59e0b;
+    font-weight: 600;
+  }
+
+  .news-sep {
+    color: #484f58;
+  }
+
+  .load-more {
+    margin-top: 0.8rem;
+    width: 100%;
+    padding: 0.45rem 0;
+    background: transparent;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    color: #8b949e;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+  }
+
+  .load-more:hover:not(:disabled) {
+    border-color: #58a6ff;
+    color: #58a6ff;
+  }
+
+  .load-more:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .news-placeholder {
+    color: #8b949e;
+    font-size: 0.875rem;
+    text-align: center;
+    padding: 1rem 0;
   }
 </style>
