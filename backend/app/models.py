@@ -98,6 +98,4 @@ class EnergyNews(Base):
         default=lambda: datetime.now(timezone.utc),
     )
 
-    __table_args__ = (
-        Index("idx_energy_news_published_at", "published_at"),
-    )
+    __table_args__ = (Index("idx_energy_news_published_at", "published_at"),)
