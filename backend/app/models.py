@@ -100,5 +100,4 @@ class EnergyNews(Base):
 
     __table_args__ = (
         Index("idx_energy_news_published_at", "published_at"),
-        Index("idx_energy_news_link", "link"),
     )

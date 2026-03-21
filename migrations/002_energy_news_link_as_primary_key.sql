@@ -13,4 +13,7 @@ ALTER TABLE energy_news DROP COLUMN id;
 -- Promote link to primary key
 ALTER TABLE energy_news ADD PRIMARY KEY (link);
 
+-- Drop the now-redundant explicit index (PK already provides one)
+DROP INDEX IF EXISTS idx_energy_news_link;
+
 COMMIT;
