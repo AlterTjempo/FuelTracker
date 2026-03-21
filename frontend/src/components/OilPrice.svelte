@@ -263,7 +263,7 @@
     <div class="news-placeholder">No news articles yet.</div>
   {:else}
     <ul class="news-list">
-      {#each newsItems as item (item.id)}
+      {#each newsItems as item (item.link)}
         <li class="news-item">
           <a class="news-link" href={item.link} target="_blank" rel="noopener noreferrer">
             {item.title}
