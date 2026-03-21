@@ -11,9 +11,8 @@ router = APIRouter()
 
 
 class EnergyNewsResponse(BaseModel):
-    id: int
-    title: str
     link: str
+    title: str
     source: str
     published_at: Optional[datetime]
     summary: Optional[str]
