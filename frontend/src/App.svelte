@@ -7,6 +7,9 @@
   import GoNowIndicator from './components/GoNowIndicator.svelte'
   import OilPrice from './components/OilPrice.svelte'
   import PriceHeatmap from './components/PriceHeatmap.svelte'
+  import UserMenu from './components/UserMenu.svelte'
+  import Favorites from './components/Favorites.svelte'
+  import { currentUser } from './lib/auth.js'
   
   let selectedFuelType = 'e5'
   let selectedHours = 24
@@ -32,9 +35,12 @@
 
 <main>
   <header>
-    <div class="container">
-      <h1>⛽ FuelTracker</h1>
-      <p class="subtitle">Live Fuel Price Tracking & Analysis</p>
+    <div class="container header-row">
+      <div>
+        <h1>⛽ FuelTracker</h1>
+        <p class="subtitle">Live Fuel Price Tracking & Analysis</p>
+      </div>
+      <UserMenu />
     </div>
   </header>
 
@@ -105,6 +111,12 @@
         <div class="main-chart">
           <PriceChart fuelType={selectedFuelType} hours={selectedHours} />
         </div>
+
+        {#if $currentUser}
+          <div class="card">
+            <Favorites selectedFuelType={selectedFuelType} />
+          </div>
+        {/if}
 
         <div class="card">
           <h2>Best Prices Now</h2>
@@ -179,6 +191,12 @@
     border-bottom: 1px solid #30363d;
     padding: 1.25rem 0;
     margin-bottom: 1rem;
+  }
+
+  .header-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
   }
 
   h1 {

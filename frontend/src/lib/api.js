@@ -19,4 +19,80 @@ export async function safeFetch(url, options = {}) {
   return response.json();
 }
 
+// --- Auth helpers ---
+
+export function getToken() {
+  return localStorage.getItem('fuel_token');
+}
+
+export function setToken(token) {
+  localStorage.setItem('fuel_token', token);
+}
+
+export function clearToken() {
+  localStorage.removeItem('fuel_token');
+  localStorage.removeItem('fuel_user');
+}
+
+export function getStoredUser() {
+  const raw = localStorage.getItem('fuel_user');
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch { return null; }
+}
+
+export function setStoredUser(user) {
+  localStorage.setItem('fuel_user', JSON.stringify(user));
+}
+
+function authHeaders() {
+  const token = getToken();
+  if (!token) return {};
+  return { Authorization: `Bearer ${token}` };
+}
+
+export async function register(username, email, password, captchaToken) {
+  return safeFetch(`${API_BASE}/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, email, password, captcha_token: captchaToken }),
+  });
+}
+
+export async function login(email, password) {
+  return safeFetch(`${API_BASE}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+export async function getMe() {
+  return safeFetch(`${API_BASE}/auth/me`, {
+    headers: authHeaders(),
+  });
+}
+
+// --- Favorites ---
+
+export async function getFavorites() {
+  return safeFetch(`${API_BASE}/favorites/`, {
+    headers: authHeaders(),
+  });
+}
+
+export async function addFavorite(stationId) {
+  return safeFetch(`${API_BASE}/favorites/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ station_id: stationId }),
+  });
+}
+
+export async function removeFavorite(stationId) {
+  return safeFetch(`${API_BASE}/favorites/${stationId}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  });
+}
+
 export default API_BASE;

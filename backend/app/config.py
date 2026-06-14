@@ -23,6 +23,14 @@ class Settings(BaseSettings):
     # Enable /docs and /redoc endpoints (disable in production)
     ENABLE_DOCS: bool = True
 
+    # JWT Authentication
+    JWT_SECRET_KEY: str = "overwritten-in-config-env-change-me"
+    JWT_ALGORITHM: str = "HS256"
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24 hours
+
+    # reCAPTCHA v2 (optional - leave empty to disable)
+    RECAPTCHA_SECRET_KEY: Optional[str] = None
+
     @property
     def get_allowed_origins(self) -> List[str]:
         """Parse comma-separated origins into a list"""

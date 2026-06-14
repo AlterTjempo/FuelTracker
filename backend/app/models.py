@@ -10,7 +10,9 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.types import TIMESTAMP
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from datetime import datetime, timezone
+import uuid
 
 from database import Base
 
@@ -99,3 +101,39 @@ class EnergyNews(Base):
     )
 
     __table_args__ = (Index("idx_energy_news_published_at", "published_at"),)
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    username = Column(String, nullable=False)
+    email = Column(String, unique=True, nullable=False, index=True)
+    hashed_password = Column(String, nullable=False)
+    created_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    favorites = relationship("FavoriteStation", back_populates="user", cascade="all, delete-orphan")
+
+
+class FavoriteStation(Base):
+    __tablename__ = "favorite_stations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    station_id = Column(String, ForeignKey("stations.id"), nullable=False)
+    added_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    user = relationship("User", back_populates="favorites")
+    station = relationship("Station")
+
+    __table_args__ = (
+        Index("idx_favorite_user_station", "user_id", "station_id", unique=True),
+    )

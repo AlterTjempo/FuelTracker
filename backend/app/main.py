@@ -11,6 +11,7 @@ from database import engine, Base
 from routers import stations, prices
 from routers import oil_prices
 from routers import energy_news
+from routers import auth, favorites
 from services.data_collector import DataCollector
 from services.oil_collector import OilCollector
 from services.news_collector import NewsCollector
@@ -77,7 +78,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.get_allowed_origins,
     allow_credentials=True,
-    allow_methods=["GET"],  # This API is read-only
+    allow_methods=["GET", "POST", "DELETE"],  # Auth and favorites need POST/DELETE
     allow_headers=["*"],
 )
 
@@ -86,6 +87,8 @@ app.include_router(stations.router, prefix="/api/stations", tags=["stations"])
 app.include_router(prices.router, prefix="/api/prices", tags=["prices"])
 app.include_router(oil_prices.router, prefix="/api/oil-prices", tags=["oil-prices"])
 app.include_router(energy_news.router, prefix="/api/energy-news", tags=["energy-news"])
+app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+app.include_router(favorites.router, prefix="/api/favorites", tags=["favorites"])
 
 
 @app.get("/")
