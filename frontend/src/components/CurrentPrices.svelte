@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import API_BASE, { safeFetch, addFavorite, removeFavorite, getFavorites, getToken } from '../lib/api.js'
   import { currentUser } from '../lib/auth.js'
+  import StationDetail from './StationDetail.svelte'
   
   export let fuelType = 'e5'
   
@@ -10,6 +11,7 @@
   let displayCount = 20
   let scrollContainer
   let favoriteIds = new Set()
+  let selectedStationId = null
   
   async function loadFavorites() {
     if (!$currentUser) { favoriteIds = new Set(); return; }
@@ -97,7 +99,9 @@
             <div class="rank">#{index + 1}</div>
             <div class="station-info">
               <div class="station-name">
-                {station.station_name}
+                <button class="name-link" on:click|stopPropagation={() => selectedStationId = station.station_id}>
+                  {station.station_name}
+                </button>
                 {#if !station.is_open}
                   <span class="status-closed">CLOSED</span>
                 {/if}
@@ -131,6 +135,10 @@
     </div>
   {/if}
 </div>
+
+{#if selectedStationId}
+  <StationDetail stationId={selectedStationId} on:close={() => selectedStationId = null} />
+{/if}
 
 <style>
   .current-prices {
@@ -199,6 +207,23 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .name-link {
+    background: none;
+    border: none;
+    color: #e6edf3;
+    font-weight: 600;
+    font-size: inherit;
+    padding: 0;
+    cursor: pointer;
+    min-height: auto;
+    text-align: left;
+  }
+
+  .name-link:hover {
+    color: #3b82f6;
+    text-decoration: underline;
   }
   
   .station-details {
