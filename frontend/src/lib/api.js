@@ -58,17 +58,33 @@ export async function register(username, email, password, captchaToken) {
   });
 }
 
-export async function login(email, password) {
+export async function login(identifier, password) {
   return safeFetch(`${API_BASE}/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ identifier, password }),
   });
 }
 
 export async function getMe() {
   return safeFetch(`${API_BASE}/auth/me`, {
     headers: authHeaders(),
+  });
+}
+
+export async function updateProfile({ username, email }) {
+  return safeFetch(`${API_BASE}/auth/me/update`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ username, email }),
+  });
+}
+
+export async function changePassword(currentPassword, newPassword) {
+  return safeFetch(`${API_BASE}/auth/me/password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
   });
 }
 

@@ -8,6 +8,7 @@
 
   let mode = 'login'; // 'login' or 'register'
   let email = '';
+  let identifier = '';
   let password = '';
   let username = '';
   let error = '';
@@ -78,7 +79,7 @@
 
     try {
       if (mode === 'login') {
-        const result = await login(email, password);
+        const result = await login(identifier, password);
         currentUser.login(result.user, result.access_token);
       } else {
         // Get captcha token if available and configured
@@ -140,18 +141,29 @@
             maxlength="50"
           />
         </div>
-      {/if}
 
-      <div class="field">
-        <label for="email">Email</label>
-        <input 
-          id="email" 
-          type="email" 
-          bind:value={email} 
-          placeholder="you@example.com"
-          required
-        />
-      </div>
+        <div class="field">
+          <label for="email">Email</label>
+          <input 
+            id="email" 
+            type="email" 
+            bind:value={email} 
+            placeholder="you@example.com"
+            required
+          />
+        </div>
+      {:else}
+        <div class="field">
+          <label for="identifier">Email or Username</label>
+          <input 
+            id="identifier" 
+            type="text" 
+            bind:value={identifier} 
+            placeholder="you@example.com or username"
+            required
+          />
+        </div>
+      {/if}
 
       <div class="field">
         <label for="password">Password</label>

@@ -16,6 +16,10 @@ function createAuthStore() {
       clearToken();
       set(null);
     },
+    updateUser(user) {
+      setStoredUser(user);
+      set(user);
+    },
     set,
   };
 }

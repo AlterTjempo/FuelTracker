@@ -1,12 +1,19 @@
 <script>
   import { currentUser } from '../lib/auth.js';
   import AuthModal from './AuthModal.svelte';
+  import SettingsModal from './SettingsModal.svelte';
 
   let showModal = false;
+  let showSettings = false;
   let showDropdown = false;
 
   function handleLogout() {
     currentUser.logout();
+    showDropdown = false;
+  }
+
+  function openSettings() {
+    showSettings = true;
     showDropdown = false;
   }
 
@@ -37,6 +44,9 @@
           <span class="dropdown-email">{$currentUser.email}</span>
         </div>
         <hr />
+        <button class="dropdown-item" on:click={openSettings}>
+          Settings
+        </button>
         <button class="dropdown-item" on:click={handleLogout}>
           Log out
         </button>
@@ -54,6 +64,10 @@
 
 {#if showModal}
   <AuthModal on:close={() => showModal = false} />
+{/if}
+
+{#if showSettings}
+  <SettingsModal on:close={() => showSettings = false} />
 {/if}
 
 <style>
