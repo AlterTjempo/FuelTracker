@@ -2,9 +2,11 @@
   import { currentUser } from '../lib/auth.js';
   import AuthModal from './AuthModal.svelte';
   import SettingsModal from './SettingsModal.svelte';
+  import AdminModal from './AdminModal.svelte';
 
   let showModal = false;
   let showSettings = false;
+  let showAdmin = false;
   let showDropdown = false;
 
   function handleLogout() {
@@ -14,6 +16,11 @@
 
   function openSettings() {
     showSettings = true;
+    showDropdown = false;
+  }
+
+  function openAdmin() {
+    showAdmin = true;
     showDropdown = false;
   }
 
@@ -44,6 +51,11 @@
           <span class="dropdown-email">{$currentUser.email}</span>
         </div>
         <hr />
+        {#if $currentUser.is_admin}
+          <button class="dropdown-item admin-item" on:click={openAdmin}>
+            Admin Page
+          </button>
+        {/if}
         <button class="dropdown-item" on:click={openSettings}>
           Settings
         </button>
@@ -68,6 +80,10 @@
 
 {#if showSettings}
   <SettingsModal on:close={() => showSettings = false} />
+{/if}
+
+{#if showAdmin}
+  <AdminModal on:close={() => showAdmin = false} />
 {/if}
 
 <style>
@@ -194,5 +210,9 @@
 
   .dropdown-item:hover {
     background: #21262d;
+  }
+
+  .admin-item {
+    color: #c9f7d8;
   }
 </style>

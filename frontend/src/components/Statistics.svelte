@@ -117,7 +117,7 @@
         </div>
         
         <div class="stat-item average">
-          <div class="stat-label">Average Price</div>
+          <div class="stat-label">Average</div>
           <div class="stat-value">€{avgPrice.toFixed(3)}</div>
           <div class="stat-subtitle">mean price</div>
         </div>

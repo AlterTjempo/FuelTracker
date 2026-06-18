@@ -6,12 +6,13 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from limiter import limiter
+from schema_migrations import apply_schema_migrations
 
 from database import engine, Base
 from routers import stations, prices
 from routers import oil_prices
 from routers import energy_news
-from routers import auth, favorites
+from routers import auth, favorites, analytics, admin
 from services.data_collector import DataCollector
 from services.oil_collector import OilCollector
 from services.news_collector import NewsCollector
@@ -23,6 +24,7 @@ scheduler = AsyncIOScheduler()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: Create tables and start scheduler
+    apply_schema_migrations(engine)
     Base.metadata.create_all(bind=engine)
 
     # Initialize data collectors
@@ -89,6 +91,8 @@ app.include_router(oil_prices.router, prefix="/api/oil-prices", tags=["oil-price
 app.include_router(energy_news.router, prefix="/api/energy-news", tags=["energy-news"])
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(favorites.router, prefix="/api/favorites", tags=["favorites"])
+app.include_router(analytics.router, prefix="/api/analytics", tags=["analytics"])
+app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
 
 
 @app.get("/")

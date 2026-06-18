@@ -54,6 +54,7 @@ class UserResponse(BaseModel):
     id: str
     username: str
     email: str
+    is_admin: bool
     created_at: datetime
 
     class Config:
@@ -108,6 +109,12 @@ def require_current_user(token: str = Depends(oauth2_scheme), db: Session = Depe
     user = db.query(User).filter(User.id == user_id).first()
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    return user
+
+
+def require_admin_user(user: User = Depends(require_current_user)) -> User:
+    if not user.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
     return user
 
 
@@ -186,7 +193,12 @@ async def register(request: Request, body: RegisterRequest, db: Session = Depend
     token = create_access_token(str(user.id))
     return TokenResponse(
         access_token=token,
-        user={"id": str(user.id), "username": user.username, "email": user.email},
+        user={
+            "id": str(user.id),
+            "username": user.username,
+            "email": user.email,
+            "is_admin": user.is_admin,
+        },
     )
 
 
@@ -205,7 +217,12 @@ async def login(request: Request, body: LoginRequest, db: Session = Depends(get_
     token = create_access_token(str(user.id))
     return TokenResponse(
         access_token=token,
-        user={"id": str(user.id), "username": user.username, "email": user.email},
+        user={
+            "id": str(user.id),
+            "username": user.username,
+            "email": user.email,
+            "is_admin": user.is_admin,
+        },
     )
 
 
@@ -215,6 +232,7 @@ async def get_me(user: User = Depends(require_current_user)):
         id=str(user.id),
         username=user.username,
         email=user.email,
+        is_admin=user.is_admin,
         created_at=user.created_at,
     )
 
@@ -252,6 +270,7 @@ async def update_profile(
         id=str(user.id),
         username=user.username,
         email=user.email,
+        is_admin=user.is_admin,
         created_at=user.created_at,
     )
 

@@ -110,6 +110,7 @@ class User(Base):
     username = Column(String, nullable=False)
     email = Column(String, unique=True, nullable=False, index=True)
     hashed_password = Column(String, nullable=False)
+    is_admin = Column(Boolean, nullable=False, default=False)
     created_at = Column(
         TIMESTAMP(timezone=True),
         nullable=False,
@@ -136,4 +137,49 @@ class FavoriteStation(Base):
 
     __table_args__ = (
         Index("idx_favorite_user_station", "user_id", "station_id", unique=True),
+    )
+
+
+class VisitorLocationCache(Base):
+    __tablename__ = "visitor_location_cache"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ip_hash = Column(String, unique=True, nullable=False, index=True)
+    country = Column(String, nullable=True)
+    region = Column(String, nullable=True)
+    city = Column(String, nullable=True)
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+    resolved_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        Index("idx_location_cache_coordinates", "latitude", "longitude"),
+    )
+
+
+class TrafficEvent(Base):
+    __tablename__ = "traffic_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    page = Column(String, nullable=False, index=True)
+    path = Column(String, nullable=False)
+    source = Column(String, nullable=False, default="direct", index=True)
+    country = Column(String, nullable=True)
+    region = Column(String, nullable=True)
+    city = Column(String, nullable=True)
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+    visited_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        Index("idx_traffic_event_visited_at", "visited_at"),
+        Index("idx_traffic_event_page_source", "page", "source"),
     )

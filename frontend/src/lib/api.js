@@ -72,6 +72,19 @@ export async function getMe() {
   });
 }
 
+export async function trackPageView(page, path = '/', referrer = '') {
+  try {
+    await fetch(`${API_BASE}/analytics/page-view`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ page, path, referrer }),
+      keepalive: true,
+    });
+  } catch {
+    // Ignore analytics failures so page navigation never breaks.
+  }
+}
+
 export async function updateProfile({ username, email }) {
   return safeFetch(`${API_BASE}/auth/me/update`, {
     method: 'POST',
@@ -85,6 +98,12 @@ export async function changePassword(currentPassword, newPassword) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  });
+}
+
+export async function getAdminTrafficSummary(days = 30) {
+  return safeFetch(`${API_BASE}/admin/traffic-summary?days=${days}`, {
+    headers: authHeaders(),
   });
 }
 

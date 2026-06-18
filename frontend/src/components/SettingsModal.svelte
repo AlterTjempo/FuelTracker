@@ -45,6 +45,7 @@
         id: updated.id,
         username: updated.username,
         email: updated.email,
+        is_admin: updated.is_admin,
       });
       profileSuccess = 'Profile updated';
     } catch (err) {

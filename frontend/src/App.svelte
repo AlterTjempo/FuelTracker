@@ -1,4 +1,5 @@
 <script>
+  import { onMount } from 'svelte'
   import PriceChart from './components/PriceChart.svelte'
   import CurrentPrices from './components/CurrentPrices.svelte'
   import LowestPrices from './components/LowestPrices.svelte'
@@ -10,10 +11,12 @@
   import UserMenu from './components/UserMenu.svelte'
   import Favorites from './components/Favorites.svelte'
   import { currentUser } from './lib/auth.js'
+  import { getMe, trackPageView } from './lib/api.js'
   
   let selectedFuelType = 'e5'
   let selectedHours = 24
   let activeTab = 'overview'
+  let lastTrackedPage = ''
   
   // Calculate YTD hours (from Jan 1 of current year to now)
   function getYTDHours() {
@@ -31,6 +34,31 @@
     { label: 'YTD', hours: getYTDHours() },
     { label: 'All', hours: 999999 }
   ]
+
+  onMount(() => {
+    const refreshCurrentUser = async () => {
+      if ($currentUser) {
+        try {
+          const user = await getMe()
+          currentUser.updateUser({
+            id: user.id,
+            username: user.username,
+            email: user.email,
+            is_admin: user.is_admin,
+          })
+        } catch {
+          currentUser.logout()
+        }
+      }
+    }
+
+    refreshCurrentUser()
+  })
+
+  $: if (activeTab && activeTab !== lastTrackedPage) {
+    lastTrackedPage = activeTab
+    trackPageView(activeTab, window.location.pathname, document.referrer)
+  }
 </script>
 
 <main>

@@ -3,7 +3,7 @@ import { getStoredUser, getToken, clearToken, setToken, setStoredUser } from './
 
 function createAuthStore() {
   const storedUser = getToken() ? getStoredUser() : null;
-  const { subscribe, set } = writable(storedUser);
+  const { subscribe, set, update } = writable(storedUser);
 
   return {
     subscribe,
@@ -19,6 +19,16 @@ function createAuthStore() {
     updateUser(user) {
       setStoredUser(user);
       set(user);
+    },
+    mergeUser(userPatch) {
+      let nextUser = null;
+      update((current) => {
+        nextUser = current ? { ...current, ...userPatch } : userPatch;
+        return nextUser;
+      });
+      if (nextUser) {
+        setStoredUser(nextUser);
+      }
     },
     set,
   };
