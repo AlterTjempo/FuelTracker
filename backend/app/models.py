@@ -117,14 +117,20 @@ class User(Base):
         default=lambda: datetime.now(timezone.utc),
     )
 
-    favorites = relationship("FavoriteStation", back_populates="user", cascade="all, delete-orphan")
+    favorites = relationship(
+        "FavoriteStation", back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class FavoriteStation(Base):
     __tablename__ = "favorite_stations"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
     station_id = Column(String, ForeignKey("stations.id"), nullable=False)
     added_at = Column(
         TIMESTAMP(timezone=True),
@@ -156,9 +162,7 @@ class VisitorLocationCache(Base):
         default=lambda: datetime.now(timezone.utc),
     )
 
-    __table_args__ = (
-        Index("idx_location_cache_coordinates", "latitude", "longitude"),
-    )
+    __table_args__ = (Index("idx_location_cache_coordinates", "latitude", "longitude"),)
 
 
 class TrafficEvent(Base):

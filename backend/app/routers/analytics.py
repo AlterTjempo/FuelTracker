@@ -64,7 +64,11 @@ def _normalize_source(referrer: str | None) -> str:
 
 async def _resolve_location(client_ip: str, db: Session) -> dict:
     ip_hash = sha256(client_ip.encode("utf-8")).hexdigest()
-    cached = db.query(VisitorLocationCache).filter(VisitorLocationCache.ip_hash == ip_hash).first()
+    cached = (
+        db.query(VisitorLocationCache)
+        .filter(VisitorLocationCache.ip_hash == ip_hash)
+        .first()
+    )
     now = datetime.now(timezone.utc)
 
     if cached and cached.resolved_at >= now - timedelta(days=30):
@@ -98,7 +102,9 @@ async def _resolve_location(client_ip: str, db: Session) -> dict:
                 response.raise_for_status()
                 data = response.json()
                 location = {
-                    "country": data.get("country_name") or data.get("country") or "Unknown",
+                    "country": data.get("country_name")
+                    or data.get("country")
+                    or "Unknown",
                     "region": data.get("region") or data.get("region_code"),
                     "city": data.get("city") or "Unknown",
                     "latitude": data.get("latitude"),
@@ -124,7 +130,9 @@ async def _resolve_location(client_ip: str, db: Session) -> dict:
 
 @router.post("/page-view")
 @limiter.limit("240/minute")
-async def track_page_view(request: Request, body: PageViewRequest, db: Session = Depends(get_db)):
+async def track_page_view(
+    request: Request, body: PageViewRequest, db: Session = Depends(get_db)
+):
     location = await _resolve_location(_get_client_ip(request), db)
 
     event = TrafficEvent(

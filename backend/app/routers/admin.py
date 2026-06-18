@@ -20,7 +20,9 @@ _TILE_CACHE_DIR = Path(__file__).resolve().parent.parent / "cache" / "osm_tiles"
 
 def require_admin_user(user: User = Depends(require_current_user)) -> User:
     if not user.is_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required"
+        )
     return user
 
 
@@ -33,13 +35,17 @@ async def get_map_tile(z: int, x: int, y: int):
     if z < 0 or z > 6:
         raise HTTPException(status_code=404, detail="Tile not found")
 
-    max_index = 2 ** z
+    max_index = 2**z
     if x < 0 or x >= max_index or y < 0 or y >= max_index:
         raise HTTPException(status_code=404, detail="Tile not found")
 
     tile_path = _TILE_CACHE_DIR / str(z) / str(x) / f"{y}.png"
     if tile_path.exists():
-        return FileResponse(tile_path, media_type="image/png", headers={"Cache-Control": "public, max-age=2592000"})
+        return FileResponse(
+            tile_path,
+            media_type="image/png",
+            headers={"Cache-Control": "public, max-age=2592000"},
+        )
 
     tile_path.parent.mkdir(parents=True, exist_ok=True)
     tile_url = f"https://tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -54,7 +60,11 @@ async def get_map_tile(z: int, x: int, y: int):
         raise HTTPException(status_code=404, detail="Tile not found")
 
     tile_path.write_bytes(response.content)
-    return FileResponse(tile_path, media_type="image/png", headers={"Cache-Control": "public, max-age=2592000"})
+    return FileResponse(
+        tile_path,
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=2592000"},
+    )
 
 
 @router.get("/traffic-summary")

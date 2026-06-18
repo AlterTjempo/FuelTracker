@@ -22,6 +22,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=Fals
 
 # --- Schemas ---
 
+
 class RegisterRequest(BaseModel):
     username: str
     email: str
@@ -63,6 +64,7 @@ class UserResponse(BaseModel):
 
 # --- Helpers ---
 
+
 def _bcrypt_safe(password: str) -> bytes:
     """bcrypt only uses the first 72 bytes; truncate to avoid raising on long input."""
     return password.encode("utf-8")[:72]
@@ -77,16 +79,24 @@ def hash_password(password: str) -> str:
 
 
 def create_access_token(user_id: str) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
+    expire = datetime.now(timezone.utc) + timedelta(
+        minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES
+    )
     payload = {"sub": user_id, "exp": expire}
-    return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+    return jwt.encode(
+        payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM
+    )
 
 
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User | None:
+def get_current_user(
+    token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
+) -> User | None:
     if token is None:
         return None
     try:
-        payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+        payload = jwt.decode(
+            token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM]
+        )
         user_id = payload.get("sub")
         if user_id is None:
             return None
@@ -96,25 +106,39 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     return user
 
 
-def require_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
+def require_current_user(
+    token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
+) -> User:
     if token is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated"
+        )
     try:
-        payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+        payload = jwt.decode(
+            token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM]
+        )
         user_id = payload.get("sub")
         if user_id is None:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
+            )
     except JWTError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
+        )
     user = db.query(User).filter(User.id == user_id).first()
     if user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found"
+        )
     return user
 
 
 def require_admin_user(user: User = Depends(require_current_user)) -> User:
     if not user.is_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required"
+        )
     return user
 
 
@@ -148,9 +172,14 @@ async def verify_captcha(token: str) -> bool:
 
 # --- Endpoints ---
 
-@router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
+
+@router.post(
+    "/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED
+)
 @limiter.limit("5/minute")
-async def register(request: Request, body: RegisterRequest, db: Session = Depends(get_db)):
+async def register(
+    request: Request, body: RegisterRequest, db: Session = Depends(get_db)
+):
     # Validate CAPTCHA
     if settings.RECAPTCHA_SECRET_KEY:
         if not body.captcha_token:
@@ -171,12 +200,16 @@ async def register(request: Request, body: RegisterRequest, db: Session = Depend
     if not body.username or len(body.username.strip()) < 1:
         raise HTTPException(status_code=400, detail="Username is required")
     if len(body.username) > 50:
-        raise HTTPException(status_code=400, detail="Username must be 50 characters or fewer")
+        raise HTTPException(
+            status_code=400, detail="Username must be 50 characters or fewer"
+        )
 
     # Check if email already exists
     existing = db.query(User).filter(User.email == body.email.lower()).first()
     if existing:
-        raise HTTPException(status_code=409, detail="An account with this email already exists")
+        raise HTTPException(
+            status_code=409, detail="An account with this email already exists"
+        )
 
     # Create user
     user = User(
@@ -248,20 +281,24 @@ async def update_profile(
         if len(uname) < 1:
             raise HTTPException(status_code=400, detail="Username is required")
         if len(uname) > 50:
-            raise HTTPException(status_code=400, detail="Username must be 50 characters or fewer")
+            raise HTTPException(
+                status_code=400, detail="Username must be 50 characters or fewer"
+            )
         user.username = uname
 
     if body.email is not None:
         new_email = body.email.lower().strip()
-        if not re.match(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$", new_email):
+        if not re.match(
+            r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$", new_email
+        ):
             raise HTTPException(status_code=400, detail="Invalid email format")
         existing = (
-            db.query(User)
-            .filter(User.email == new_email, User.id != user.id)
-            .first()
+            db.query(User).filter(User.email == new_email, User.id != user.id).first()
         )
         if existing:
-            raise HTTPException(status_code=409, detail="An account with this email already exists")
+            raise HTTPException(
+                status_code=409, detail="An account with this email already exists"
+            )
         user.email = new_email
 
     db.commit()
