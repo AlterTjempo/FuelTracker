@@ -1,12 +1,14 @@
 <script>
   import { onMount } from 'svelte';
   import { getFavorites, removeFavorite } from '../lib/api.js';
+  import StationDetail from './StationDetail.svelte';
   
   export let selectedFuelType = 'e5';
   
   let favorites = [];
   let loading = true;
   let error = null;
+  let selectedStationId = null;
   
   async function loadFavorites() {
     loading = true;
@@ -53,7 +55,7 @@
 </script>
 
 <div class="favorites">
-  <h2>Your Favorite Stations</h2>
+  <h2>⭐ Your Favorite Stations</h2>
   
   {#if loading}
     <div class="loading">Loading favorites...</div>
@@ -64,213 +66,202 @@
     </div>
   {:else if favorites.length === 0}
     <div class="empty">
-      <p>You haven't added any favorite stations yet.</p>
-      <p>Browse the map or current prices to add favorites!</p>
+      <p>No favorite stations yet. Star a station from the All Stations tab!</p>
     </div>
   {:else}
     <div class="favorites-list">
       {#each favorites as station (station.id)}
-        <div class="favorite-card">
-          <div class="station-info">
-            <h3>{station.name}</h3>
-            <p class="brand">{station.brand || 'Unknown Brand'}</p>
-            <p class="address">
-              {station.street} {station.house_number}<br>
-              {station.post_code} {station.city}
-            </p>
+        <div class="favorite-row">
+          <div class="row-left">
+            <button class="name-link" on:click={() => selectedStationId = station.id}>
+              {station.name}
+            </button>
+            {#if station.brand}
+              <span class="brand-tag">{station.brand}</span>
+            {/if}
+            {#if !station.is_open}
+              <span class="closed-tag">CLOSED</span>
+            {/if}
           </div>
-          
-          <div class="price-info">
-            <div class="current-price">
-              <span class="price">{formatPrice(getPriceForFuelType(station))}</span>
-            </div>
-            
-            <div class="status {station.is_open ? 'open' : 'closed'}">
-              {station.is_open ? '🟢 Open' : '🔴 Closed'}
-            </div>
+          <div class="row-right">
+            <span class="city">{station.city || ''}</span>
+            <span class="price">{formatPrice(getPriceForFuelType(station))}</span>
+            <button 
+              class="remove-btn" 
+              on:click={() => handleRemoveFavorite(station.id)}
+              title="Remove from favorites"
+            >✕</button>
           </div>
-          
-          <button 
-            class="remove-btn" 
-            on:click={() => handleRemoveFavorite(station.id)}
-            title="Remove from favorites"
-          >
-            ❌
-          </button>
         </div>
       {/each}
     </div>
   {/if}
 </div>
 
+{#if selectedStationId}
+  <StationDetail stationId={selectedStationId} on:close={() => selectedStationId = null} />
+{/if}
+
 <style>
   .favorites {
-    padding: 1rem;
+    padding: 0;
   }
   
   h2 {
-    margin: 0 0 1.5rem 0;
+    margin: 0 0 0.75rem 0;
     color: #c9d1d9;
+    font-size: 1.1rem;
   }
   
   .loading {
     text-align: center;
-    padding: 3rem;
+    padding: 1.5rem;
     color: #8b949e;
-    font-size: 1.1rem;
   }
   
   .error {
     background: #3f1f1f;
     color: #ff7b72;
-    padding: 1rem;
-    border-radius: 4px;
+    padding: 0.75rem;
+    border-radius: 6px;
     text-align: center;
     border: 1px solid #5a2828;
+    font-size: 0.85rem;
   }
   
   .error button {
-    margin-top: 0.5rem;
-    padding: 0.5rem 1rem;
+    margin-left: 0.5rem;
+    padding: 0.25rem 0.75rem;
     background: #dc2626;
     color: white;
     border: none;
     border-radius: 4px;
     cursor: pointer;
-  }
-  
-  .error button:hover {
-    background: #b91c1c;
+    font-size: 0.8rem;
+    min-height: auto;
   }
   
   .empty {
     text-align: center;
-    padding: 3rem;
+    padding: 1.5rem;
     color: #8b949e;
+    font-size: 0.9rem;
   }
   
   .empty p {
-    margin: 0.5rem 0;
+    margin: 0;
   }
   
   .favorites-list {
-    display: grid;
-    gap: 1rem;
-  }
-  
-  .favorite-card {
-    background: #161b22;
-    border: 1px solid #30363d;
-    border-radius: 8px;
-    padding: 1.25rem;
-    position: relative;
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 1rem;
-    transition: box-shadow 0.3s;
-  }
-  
-  .favorite-card:hover {
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
-    border-color: #58a6ff;
-  }
-  
-  .station-info h3 {
-    margin: 0 0 0.5rem 0;
-    color: #c9d1d9;
-    font-size: 1.1rem;
-  }
-  
-  .brand {
-    margin: 0 0 0.5rem 0;
-    color: #3fb950;
-    font-weight: 600;
-  }
-  
-  .address {
-    margin: 0;
-    color: #8b949e;
-    font-size: 0.9rem;
-    line-height: 1.4;
-  }
-  
-  .price-info {
-    text-align: right;
     display: flex;
     flex-direction: column;
-    justify-content: center;
     gap: 0.5rem;
   }
   
-  .current-price {
+  .favorite-row {
     display: flex;
-    flex-direction: column;
-    align-items: flex-end;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    transition: border-color 0.2s;
   }
   
-  .fuel-type {
-    font-size: 0.75rem;
-    color: #8b949e;
-    text-transform: uppercase;
+  .favorite-row:hover {
+    border-color: #3b82f6;
+  }
+  
+  .row-left {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+    flex: 1;
+  }
+  
+  .row-right {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-shrink: 0;
+  }
+  
+  .name-link {
+    background: none;
+    border: none;
+    color: #e6edf3;
     font-weight: 600;
+    font-size: 0.95rem;
+    padding: 0;
+    cursor: pointer;
+    min-height: auto;
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  
+  .name-link:hover {
+    color: #3b82f6;
+    text-decoration: underline;
+  }
+  
+  .brand-tag {
+    font-size: 0.8rem;
+    color: #3fb950;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  
+  .closed-tag {
+    font-size: 0.6rem;
+    font-weight: 700;
+    color: #fff;
+    background: #ef4444;
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+    white-space: nowrap;
+  }
+  
+  .city {
+    color: #8b949e;
+    font-size: 0.85rem;
+    white-space: nowrap;
   }
   
   .price {
-    font-size: 1.5rem;
-    font-weight: bold;
+    font-size: 1.1rem;
+    font-weight: 700;
     color: #3b82f6;
-  }
-  
-  .status {
-    font-size: 0.85rem;
-    padding: 0.25rem 0.5rem;
-    border-radius: 4px;
-    display: inline-block;
-  }
-  
-  .status.open {
-    background: rgba(63, 185, 80, 0.15);
-    color: #3fb950;
-    border: 1px solid #3fb950;
-  }
-  
-  .status.closed {
-    background: rgba(248, 81, 73, 0.15);
-    color: #f85149;
-    border: 1px solid #f85149;
+    white-space: nowrap;
+    min-width: 4.5rem;
+    text-align: right;
   }
   
   .remove-btn {
-    position: absolute;
-    top: 0.5rem;
-    right: 0.5rem;
     background: none;
     border: none;
-    font-size: 1rem;
+    color: #8b949e;
+    font-size: 0.85rem;
     cursor: pointer;
-    opacity: 0.5;
-    transition: opacity 0.3s;
     padding: 0.25rem;
+    min-height: auto;
+    line-height: 1;
+    opacity: 0.5;
+    transition: opacity 0.2s, color 0.2s;
   }
   
   .remove-btn:hover {
     opacity: 1;
+    color: #f85149;
   }
-  
+
   @media (max-width: 600px) {
-    .favorite-card {
-      grid-template-columns: 1fr;
-    }
-    
-    .price-info {
-      text-align: left;
-      flex-direction: row;
-      justify-content: space-between;
-      align-items: center;
-    }
-    
-    .current-price {
-      align-items: flex-start;
+    .city {
+      display: none;
     }
   }
 </style>

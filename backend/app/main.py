@@ -6,11 +6,13 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from limiter import limiter
+from schema_migrations import apply_schema_migrations
 
 from database import engine, Base
 from routers import stations, prices
 from routers import oil_prices
 from routers import energy_news
+from routers import auth, favorites, analytics, admin
 from services.data_collector import DataCollector
 from services.oil_collector import OilCollector
 from services.news_collector import NewsCollector
@@ -23,6 +25,7 @@ scheduler = AsyncIOScheduler()
 async def lifespan(app: FastAPI):
     # Startup: Create tables and start scheduler
     Base.metadata.create_all(bind=engine)
+    apply_schema_migrations(engine)
 
     # Initialize data collectors
     collector = DataCollector()
@@ -77,7 +80,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.get_allowed_origins,
     allow_credentials=True,
-    allow_methods=["GET"],  # This API is read-only
+    allow_methods=["GET", "POST", "DELETE"],  # Auth and favorites need POST/DELETE
     allow_headers=["*"],
 )
 
@@ -86,6 +89,10 @@ app.include_router(stations.router, prefix="/api/stations", tags=["stations"])
 app.include_router(prices.router, prefix="/api/prices", tags=["prices"])
 app.include_router(oil_prices.router, prefix="/api/oil-prices", tags=["oil-prices"])
 app.include_router(energy_news.router, prefix="/api/energy-news", tags=["energy-news"])
+app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+app.include_router(favorites.router, prefix="/api/favorites", tags=["favorites"])
+app.include_router(analytics.router, prefix="/api/analytics", tags=["analytics"])
+app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
 
 
 @app.get("/")

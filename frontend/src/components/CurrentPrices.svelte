@@ -1,6 +1,8 @@
 <script>
   import { onMount } from 'svelte'
-  import API_BASE, { safeFetch } from '../lib/api.js'
+  import API_BASE, { safeFetch, addFavorite, removeFavorite, getFavorites } from '../lib/api.js'
+  import { currentUser } from '../lib/auth.js'
+  import StationDetail from './StationDetail.svelte'
   
   export let fuelType = 'e5'
   
@@ -8,6 +10,33 @@
   let loading = true
   let displayCount = 20
   let scrollContainer
+  let favoriteIds = new Set()
+  let selectedStationId = null
+  
+  async function loadFavorites() {
+    if (!$currentUser) { favoriteIds = new Set(); return; }
+    try {
+      const favs = await getFavorites();
+      favoriteIds = new Set(favs.map(f => f.id));
+    } catch { favoriteIds = new Set(); }
+  }
+
+  async function toggleFavorite(stationId) {
+    if (!$currentUser) return;
+    try {
+      if (favoriteIds.has(stationId)) {
+        await removeFavorite(stationId);
+        favoriteIds.delete(stationId);
+        favoriteIds = favoriteIds; // trigger reactivity
+      } else {
+        await addFavorite(stationId);
+        favoriteIds.add(stationId);
+        favoriteIds = favoriteIds;
+      }
+    } catch (err) {
+      console.error('Favorite toggle failed:', err);
+    }
+  }
   
   async function fetchPrices() {
     try {
@@ -41,6 +70,12 @@
     const interval = setInterval(fetchPrices, 60000)
     return () => clearInterval(interval)
   })
+
+  $: if ($currentUser) {
+    loadFavorites()
+  } else {
+    favoriteIds = new Set()
+  }
   
   $: if (fuelType) {
     prices = [...prices].sort((a, b) => {
@@ -69,7 +104,9 @@
             <div class="rank">#{index + 1}</div>
             <div class="station-info">
               <div class="station-name">
-                {station.station_name}
+                <button class="name-link" on:click|stopPropagation={() => selectedStationId = station.station_id}>
+                  {station.station_name}
+                </button>
                 {#if !station.is_open}
                   <span class="status-closed">CLOSED</span>
                 {/if}
@@ -84,6 +121,16 @@
               </div>
             </div>
             <div class="price">€{getPrice(station).toFixed(3)}</div>
+            {#if $currentUser}
+              <button 
+                class="fav-btn" 
+                class:favorited={favoriteIds.has(station.station_id)}
+                on:click|stopPropagation={() => toggleFavorite(station.station_id)}
+                title={favoriteIds.has(station.station_id) ? 'Remove from favorites' : 'Add to favorites'}
+              >
+                {favoriteIds.has(station.station_id) ? '★' : '☆'}
+              </button>
+            {/if}
           </div>
         {/if}
       {/each}
@@ -93,6 +140,10 @@
     </div>
   {/if}
 </div>
+
+{#if selectedStationId}
+  <StationDetail stationId={selectedStationId} on:close={() => selectedStationId = null} />
+{/if}
 
 <style>
   .current-prices {
@@ -161,6 +212,23 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .name-link {
+    background: none;
+    border: none;
+    color: #e6edf3;
+    font-weight: 600;
+    font-size: inherit;
+    padding: 0;
+    cursor: pointer;
+    min-height: auto;
+    text-align: left;
+  }
+
+  .name-link:hover {
+    color: #3b82f6;
+    text-decoration: underline;
   }
   
   .station-details {
@@ -262,5 +330,26 @@
       font-size: 1.3rem;
       min-width: 6rem;
     }
+  }
+
+  .fav-btn {
+    background: none;
+    border: none;
+    font-size: 1.25rem;
+    cursor: pointer;
+    padding: 0.25rem;
+    color: #8b949e;
+    transition: color 0.2s, transform 0.2s;
+    min-height: auto;
+    flex-shrink: 0;
+  }
+
+  .fav-btn:hover {
+    transform: scale(1.2);
+    color: #f59e0b;
+  }
+
+  .fav-btn.favorited {
+    color: #f59e0b;
   }
 </style>

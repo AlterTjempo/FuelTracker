@@ -18,3 +18,4 @@ ENV/
 *.swo
 .DS_Store
 node_modules/
+/backend/app/cache
