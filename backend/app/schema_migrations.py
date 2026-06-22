@@ -3,7 +3,8 @@ from sqlalchemy import text
 
 def apply_schema_migrations(engine) -> None:
     statements = [
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)",
         """
         CREATE TABLE IF NOT EXISTS visitor_location_cache (
             id SERIAL PRIMARY KEY,

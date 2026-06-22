@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte'
-  import API_BASE, { safeFetch, addFavorite, removeFavorite, getFavorites, getToken } from '../lib/api.js'
+  import API_BASE, { safeFetch, addFavorite, removeFavorite, getFavorites } from '../lib/api.js'
   import { currentUser } from '../lib/auth.js'
   import StationDetail from './StationDetail.svelte'
   
@@ -67,10 +67,15 @@
   
   onMount(() => {
     fetchPrices()
-    loadFavorites()
     const interval = setInterval(fetchPrices, 60000)
     return () => clearInterval(interval)
   })
+
+  $: if ($currentUser) {
+    loadFavorites()
+  } else {
+    favoriteIds = new Set()
+  }
   
   $: if (fuelType) {
     prices = [...prices].sort((a, b) => {

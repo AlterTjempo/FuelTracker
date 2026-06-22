@@ -24,8 +24,8 @@ scheduler = AsyncIOScheduler()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: Create tables and start scheduler
-    apply_schema_migrations(engine)
     Base.metadata.create_all(bind=engine)
+    apply_schema_migrations(engine)
 
     # Initialize data collectors
     collector = DataCollector()

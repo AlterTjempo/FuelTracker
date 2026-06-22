@@ -203,6 +203,7 @@ async def register(
         raise HTTPException(
             status_code=400, detail="Username must be 50 characters or fewer"
         )
+    normalized_username = body.username.strip()
 
     # Check if email already exists
     existing = db.query(User).filter(User.email == body.email.lower()).first()
@@ -210,11 +211,16 @@ async def register(
         raise HTTPException(
             status_code=409, detail="An account with this email already exists"
         )
+    existing_username = (
+        db.query(User).filter(User.username == normalized_username).first()
+    )
+    if existing_username:
+        raise HTTPException(status_code=409, detail="Username is already taken")
 
     # Create user
     user = User(
         id=uuid.uuid4(),
-        username=body.username.strip(),
+        username=normalized_username,
         email=body.email.lower().strip(),
         hashed_password=hash_password(body.password),
     )
@@ -284,6 +290,11 @@ async def update_profile(
             raise HTTPException(
                 status_code=400, detail="Username must be 50 characters or fewer"
             )
+        existing = (
+            db.query(User).filter(User.username == uname, User.id != user.id).first()
+        )
+        if existing:
+            raise HTTPException(status_code=409, detail="Username is already taken")
         user.username = uname
 
     if body.email is not None:

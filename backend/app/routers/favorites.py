@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional
@@ -42,20 +43,40 @@ def get_favorites(
     favorites = (
         db.query(FavoriteStation).filter(FavoriteStation.user_id == user.id).all()
     )
+    station_ids = list({fav.station_id for fav in favorites})
+    if not station_ids:
+        return []
+
+    stations = db.query(Station).filter(Station.id.in_(station_ids)).all()
+    station_by_id = {station.id: station for station in stations}
+
+    latest_timestamp_subquery = (
+        db.query(
+            FuelPrice.station_id.label("station_id"),
+            func.max(FuelPrice.timestamp).label("max_timestamp"),
+        )
+        .filter(FuelPrice.station_id.in_(station_ids))
+        .group_by(FuelPrice.station_id)
+        .subquery()
+    )
+    latest_prices = (
+        db.query(FuelPrice)
+        .join(
+            latest_timestamp_subquery,
+            (FuelPrice.station_id == latest_timestamp_subquery.c.station_id)
+            & (FuelPrice.timestamp == latest_timestamp_subquery.c.max_timestamp),
+        )
+        .all()
+    )
+    latest_price_by_station_id = {price.station_id: price for price in latest_prices}
 
     results = []
     for fav in favorites:
-        station = fav.station
+        station = station_by_id.get(fav.station_id)
         if not station:
             continue
 
-        # Get latest price for this station
-        latest_price = (
-            db.query(FuelPrice)
-            .filter(FuelPrice.station_id == station.id)
-            .order_by(FuelPrice.timestamp.desc())
-            .first()
-        )
+        latest_price = latest_price_by_station_id.get(station.id)
 
         results.append(
             FavoriteStationResponse(

@@ -2,12 +2,13 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from database import get_db
+from limiter import limiter
 from models import TrafficEvent, User
 from routers.auth import require_current_user
 
@@ -16,6 +17,7 @@ router = APIRouter()
 _SUMMARY_CACHE: dict[int, tuple[datetime, dict]] = {}
 _SUMMARY_CACHE_SECONDS = 300
 _TILE_CACHE_DIR = Path(__file__).resolve().parent.parent / "cache" / "osm_tiles"
+_MAX_CACHED_TILES = 5000
 
 
 def require_admin_user(user: User = Depends(require_current_user)) -> User:
@@ -31,7 +33,8 @@ def invalidate_summary_cache() -> None:
 
 
 @router.get("/map-tiles/{z}/{x}/{y}.png", include_in_schema=False)
-async def get_map_tile(z: int, x: int, y: int):
+@limiter.limit("120/minute")
+async def get_map_tile(request: Request, z: int, x: int, y: int):
     if z < 0 or z > 6:
         raise HTTPException(status_code=404, detail="Tile not found")
 
@@ -58,6 +61,9 @@ async def get_map_tile(z: int, x: int, y: int):
 
     if response.status_code != 200:
         raise HTTPException(status_code=404, detail="Tile not found")
+
+    if sum(1 for _ in _TILE_CACHE_DIR.rglob("*.png")) >= _MAX_CACHED_TILES:
+        raise HTTPException(status_code=503, detail="Tile cache limit reached")
 
     tile_path.write_bytes(response.content)
     return FileResponse(

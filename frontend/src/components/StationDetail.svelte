@@ -31,10 +31,19 @@
     return `€${price.toFixed(3)}`;
   }
 
-  onMount(loadStation);
+  onMount(() => {
+    loadStation();
+    const handleWindowKeydown = (event) => {
+      if (event.key === 'Escape') {
+        close();
+      }
+    };
+    window.addEventListener('keydown', handleWindowKeydown);
+    return () => window.removeEventListener('keydown', handleWindowKeydown);
+  });
 </script>
 
-<div class="detail-overlay" on:click={close} on:keydown={e => e.key === 'Escape' && close()}>
+<div class="detail-overlay" on:click={close}>
   <div class="detail-panel" on:click|stopPropagation>
     <button class="back-btn" on:click={close}>← Back to list</button>
 

@@ -14,6 +14,8 @@
   let error = '';
   let loading = false;
   let captchaRendered = false;
+  let recaptchaPollInterval;
+  let recaptchaPollTimeout;
 
   // Live password validation
   $: hasMinLength = password.length >= 8;
@@ -62,15 +64,31 @@
     if (RECAPTCHA_SITE_KEY) {
       loadRecaptchaScript();
       // Poll until grecaptcha is available (script loads async)
-      const interval = setInterval(() => {
+      recaptchaPollInterval = setInterval(() => {
         if (window.grecaptcha && window.grecaptcha.render) {
-          clearInterval(interval);
+          clearInterval(recaptchaPollInterval);
+          recaptchaPollInterval = null;
           renderCaptcha();
         }
       }, 200);
       // Clean up after 10s
-      setTimeout(() => clearInterval(interval), 10000);
+      recaptchaPollTimeout = setTimeout(() => {
+        if (recaptchaPollInterval) {
+          clearInterval(recaptchaPollInterval);
+          recaptchaPollInterval = null;
+        }
+      }, 10000);
     }
+    return () => {
+      if (recaptchaPollInterval) {
+        clearInterval(recaptchaPollInterval);
+        recaptchaPollInterval = null;
+      }
+      if (recaptchaPollTimeout) {
+        clearTimeout(recaptchaPollTimeout);
+        recaptchaPollTimeout = null;
+      }
+    };
   });
 
   async function handleSubmit() {

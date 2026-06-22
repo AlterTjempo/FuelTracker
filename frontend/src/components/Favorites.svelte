@@ -77,7 +77,7 @@
               {station.name}
             </button>
             {#if station.brand}
-              <span class="brand-tag">{station.city}</span>
+              <span class="brand-tag">{station.brand}</span>
             {/if}
             {#if !station.is_open}
               <span class="closed-tag">CLOSED</span>

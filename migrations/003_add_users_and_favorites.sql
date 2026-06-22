@@ -1,13 +1,16 @@
 -- Create users table
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    username VARCHAR NOT NULL,
+    username VARCHAR NOT NULL UNIQUE,
     email VARCHAR NOT NULL UNIQUE,
     hashed_password VARCHAR NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username);
 
 -- Create favorite_stations table
 CREATE TABLE IF NOT EXISTS favorite_stations (
