@@ -17,6 +17,7 @@ router = APIRouter()
 _SUMMARY_CACHE: dict[int, tuple[datetime, dict]] = {}
 _SUMMARY_CACHE_SECONDS = 300
 _TILE_CACHE_DIR = Path(__file__).resolve().parent.parent / "cache" / "osm_tiles"
+_TILE_CACHE_ROOT = _TILE_CACHE_DIR.resolve()
 _MAX_CACHED_TILES = 5000
 
 
@@ -42,7 +43,10 @@ async def get_map_tile(request: Request, z: int, x: int, y: int):
     if x < 0 or x >= max_index or y < 0 or y >= max_index:
         raise HTTPException(status_code=404, detail="Tile not found")
 
-    tile_path = _TILE_CACHE_DIR / str(z) / str(x) / f"{y}.png"
+    tile_path = (_TILE_CACHE_ROOT / str(z) / str(x) / f"{y}.png").resolve()
+    if _TILE_CACHE_ROOT not in tile_path.parents:
+        raise HTTPException(status_code=404, detail="Tile not found")
+
     if tile_path.exists():
         return FileResponse(
             tile_path,
@@ -50,7 +54,10 @@ async def get_map_tile(request: Request, z: int, x: int, y: int):
             headers={"Cache-Control": "public, max-age=2592000"},
         )
 
-    tile_path.parent.mkdir(parents=True, exist_ok=True)
+    tile_parent = tile_path.parent
+    if _TILE_CACHE_ROOT not in tile_parent.parents and tile_parent != _TILE_CACHE_ROOT:
+        raise HTTPException(status_code=404, detail="Tile not found")
+    tile_parent.mkdir(parents=True, exist_ok=True)
     tile_url = f"https://tile.openstreetmap.org/{z}/{x}/{y}.png"
 
     async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
