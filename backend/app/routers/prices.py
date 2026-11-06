@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 import analytics_config as cfg
 from cache import ttl_cached
 from limiter import limiter
-from services import go_now
+from services import go_now, literboard
 from services.stats_utils import haversine_km
 
 from database import get_db
@@ -35,10 +35,6 @@ FUEL_COLUMNS = {
     "e10": FuelPrice.e10,
     "diesel": FuelPrice.diesel,
 }
-
-
-MIN_ROWS_PER_SWING_DAY = 48  # ~12 h of 15-minute observations
-MIN_SWING_DAYS = 7
 
 
 def _stability_label(ratio):
@@ -672,17 +668,59 @@ def get_top_stations(
     fuel_type: str = Query("e5", pattern="^(e5|e10|diesel)$"),
     hours: int = Query(168, ge=24, le=1000000),
     limit: int = Query(3, ge=1, le=10),
+    opening_hours_weighted: bool = Query(
+        False,
+        description="Relate 'cheapest X% of the time' to the hours the station had data (was open)",
+    ),
     db: Session = Depends(get_db),
 ):
-    """Get top stations by average price and consistency"""
-    since = datetime.now(timezone.utc) - timedelta(hours=hours)
-    # Volatility is always measured over a fixed 30-day window so that the
-    # stability label is a station characteristic, not an artefact of the
-    # currently selected time range.
-    volatility_since = datetime.now(timezone.utc) - timedelta(days=30)
-    fuel_column = _get_fuel_column(fuel_type)
+    """Top stations by average price, with the data volume behind every figure.
 
-    # Get station statistics (ranking window = user-selected hours)
+    Stations with too little data in the window are returned unranked at the
+    end (`ranked: false`, `enough_data: false`) instead of being ranked next to
+    well-covered stations. See docs/prediction-models.md.
+    """
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(hours=hours)
+    # Stability uses a fixed window (analytics_config.LITERBOARD_STABILITY_DAYS) so that the
+    # label is a station characteristic, not an artefact of the selected time range.
+    stability_since = now - timedelta(days=cfg.LITERBOARD_STABILITY_DAYS)
+    fuel_column = _get_fuel_column(fuel_type)
+    local_day = func.date(_local_ts())
+
+    # Ranking window statistics for every station (all stations: eligibility needs the full picture)
+    hour_bucket = func.date_trunc("hour", FuelPrice.timestamp).label("hour_bucket")
+    per_station_hour = (
+        db.query(
+            hour_bucket,
+            FuelPrice.station_id.label("station_id"),
+            func.min(fuel_column).label("min_price"),
+        )
+        .filter(FuelPrice.timestamp >= since, fuel_column.isnot(None))
+        .group_by(hour_bucket, FuelPrice.station_id)
+        .subquery()
+    )
+    hours_by_station = {
+        r.station_id: r.n
+        for r in db.query(
+            per_station_hour.c.station_id, func.count().label("n")
+        ).group_by(per_station_hour.c.station_id)
+    }
+    total_hours = (
+        db.query(func.count(func.distinct(hour_bucket)))
+        .filter(FuelPrice.timestamp >= since, fuel_column.isnot(None))
+        .scalar()
+        or 0
+    )
+    days_by_station = {
+        r.station_id: r.n
+        for r in db.query(
+            FuelPrice.station_id,
+            func.count(func.distinct(local_day)).label("n"),
+        )
+        .filter(FuelPrice.timestamp >= since, fuel_column.isnot(None))
+        .group_by(FuelPrice.station_id)
+    }
     station_stats = (
         db.query(
             FuelPrice.station_id,
@@ -697,24 +735,19 @@ def get_top_stations(
         .join(Station, FuelPrice.station_id == Station.id)
         .filter(FuelPrice.timestamp >= since, fuel_column.isnot(None))
         .group_by(FuelPrice.station_id, Station.name, Station.brand, Station.city)
-        .order_by(func.avg(fuel_column))
-        .limit(limit)
         .all()
     )
 
-    # Volatility subquery over fixed 30-day window
     # Stability = how big a station's typical daily price swing is compared with
-    # the other stations. (A raw standard deviation over all rows made every
-    # station look "very volatile": all stations share the ~13 cent midday jump
-    # and any longer-term price level change.)
-    local_day = func.date(_local_ts())
+    # the other stations (see docs). Rows exist only while a station is open, so
+    # a day's range is always measured over its open hours.
     daily = (
         db.query(
             FuelPrice.station_id.label("station_id"),
             (func.max(fuel_column) - func.min(fuel_column)).label("rng"),
             func.count(FuelPrice.id).label("n"),
         )
-        .filter(FuelPrice.timestamp >= volatility_since, fuel_column.isnot(None))
+        .filter(FuelPrice.timestamp >= stability_since, fuel_column.isnot(None))
         .group_by(FuelPrice.station_id, local_day)
         .subquery()
     )
@@ -724,31 +757,21 @@ def get_top_stations(
             func.avg(daily.c.rng).label("swing"),
             func.count().label("days"),
         )
-        .filter(daily.c.n >= MIN_ROWS_PER_SWING_DAY)
+        .filter(daily.c.n >= cfg.LITERBOARD_MIN_ROWS_PER_DAY)
         .group_by(daily.c.station_id)
         .all()
     )
     swing_map = {
-        r.station_id: float(r.swing) for r in swing_rows if r.days >= MIN_SWING_DAYS
+        r.station_id: (float(r.swing), r.days)
+        for r in swing_rows
+        if r.days >= cfg.LITERBOARD_MIN_STABILITY_DAYS
     }
-    swing_values = sorted(swing_map.values())
+    swing_values = sorted(v[0] for v in swing_map.values())
     market_swing = swing_values[len(swing_values) // 2] if swing_values else None
 
     # Cheapest share: for each hour bucket, rank stations by their minimum price
-    # in that hour; a station is "cheapest" for the hour if it holds rank 1
-    # (ties all count). Share = cheapest hours / hours with any data.
-    hour_bucket = func.date_trunc("hour", FuelPrice.timestamp).label("hour_bucket")
-    per_station_hour = (
-        db.query(
-            hour_bucket,
-            FuelPrice.station_id.label("station_id"),
-            func.min(fuel_column).label("min_price"),
-        )
-        .filter(FuelPrice.timestamp >= since, fuel_column.isnot(None))
-        .group_by(hour_bucket, FuelPrice.station_id)
-        .subquery()
-    )
-    ranked = db.query(
+    # in that hour; a station is "cheapest" for the hour if it holds rank 1 (ties all count).
+    ranked_sq = db.query(
         per_station_hour.c.station_id,
         func.rank()
         .over(
@@ -757,30 +780,20 @@ def get_top_stations(
         )
         .label("rnk"),
     ).subquery()
-    cheapest_rows = (
-        db.query(ranked.c.station_id, func.count().label("n"))
-        .filter(ranked.c.rnk == 1)
-        .group_by(ranked.c.station_id)
-        .all()
-    )
-    cheapest_counts = {r.station_id: r.n for r in cheapest_rows}
-    total_samples = (
-        db.query(func.count(func.distinct(hour_bucket)))
-        .filter(FuelPrice.timestamp >= since, fuel_column.isnot(None))
-        .scalar()
-        or 0
-    )
+    cheapest_counts = {
+        r.station_id: r.n
+        for r in db.query(ranked_sq.c.station_id, func.count().label("n"))
+        .filter(ranked_sq.c.rnk == 1)
+        .group_by(ranked_sq.c.station_id)
+    }
 
-    results = []
+    rows = []
     for stat in station_stats:
-        cheapest_count = cheapest_counts.get(stat.station_id, 0)
-        cheapest_percentage = (
-            (cheapest_count / total_samples) * 100 if total_samples > 0 else 0
-        )
-
-        swing = swing_map.get(stat.station_id)
+        swing_info = swing_map.get(stat.station_id)
+        swing = swing_info[0] if swing_info else None
         ratio = swing / market_swing if swing is not None and market_swing else None
-        results.append(
+        station_hours = hours_by_station.get(stat.station_id, 0)
+        rows.append(
             {
                 "station_id": stat.station_id,
                 "name": stat.name,
@@ -794,12 +807,32 @@ def get_top_stations(
                 ),
                 "swing_vs_market": round(ratio, 2) if ratio is not None else None,
                 "stability": _stability_label(ratio),
-                "cheapest_percentage": round(cheapest_percentage, 1),
+                "stability_days": swing_info[1] if swing_info else 0,
+                "stability_window_days": cfg.LITERBOARD_STABILITY_DAYS,
+                "cheapest_percentage": literboard.cheapest_percentage(
+                    cheapest_counts.get(stat.station_id, 0),
+                    total_hours,
+                    station_hours,
+                    opening_hours_weighted,
+                ),
                 "data_points": stat.data_points,
+                "hours_with_data": station_hours,
+                "days_with_data": days_by_station.get(stat.station_id, 0),
+                "window_hours": total_hours,
+                "opening_hours_weighted": opening_hours_weighted,
             }
         )
 
-    return results
+    ranked, unranked = literboard.split_by_coverage(rows)
+    ranked.sort(key=lambda r: r["avg_price"])
+    unranked.sort(key=lambda r: r["avg_price"])
+    for i, r in enumerate(ranked[:limit], start=1):
+        r["ranked"], r["enough_data"], r["rank"] = True, True, i
+    out = ranked[:limit]
+    for r in unranked[: cfg.LITERBOARD_MAX_UNRANKED]:
+        r["ranked"], r["enough_data"], r["rank"] = False, False, None
+        out.append(r)
+    return out
 
 
 @router.get("/analytics/heatmap")

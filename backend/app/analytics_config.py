@@ -160,3 +160,19 @@ BRAND_MIN_DAYS = 14  # default: complete days a brand group needs to be analysed
 WEEKDAY_MIN_OFFSET_CENTS = (
     0.3  # existing rule: a weekday must clear 0.3 cents and its standard error
 )
+
+# --------------------------------------------------------------- Literboard ----
+LITERBOARD_STABILITY_DAYS = 30  # backtest (services/literboard_check.py): 30 d predicts recent stability best (rho 0.75; 0.72 @60 d, 0.69 @90 d); fixed window
+LITERBOARD_MIN_ROWS_PER_DAY = (
+    48  # default: ~12 h of 15-minute data for a day to count towards stability
+)
+LITERBOARD_MIN_STABILITY_DAYS = (
+    7  # default: qualifying days needed for a stability label
+)
+LITERBOARD_MIN_HOURS = (
+    6  # configurable (requested): absolute minimum hours of data to be ranked
+)
+LITERBOARD_MIN_DATA_SHARE = 0.5  # configurable (requested): ... and at least this share of the best-covered station's hours
+LITERBOARD_MAX_UNRANKED = (
+    5  # default: how many "not enough data" stations are listed at the end
+)

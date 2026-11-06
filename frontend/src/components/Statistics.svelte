@@ -14,6 +14,16 @@
   let topStations = null
   let lowestEver = null
   let loading = true
+  // Optional: relate 'cheapest X% of the time' to the hours a station was open (had data).
+  let weighted = readPref() === '1'
+
+  function readPref() {
+    try { return localStorage.getItem('fuel_lb_weighted') } catch { return null }
+  }
+  function toggleWeighted() {
+    try { localStorage.setItem('fuel_lb_weighted', weighted ? '1' : '0') } catch { /* ignore */ }
+    fetchStats()
+  }
   
   async function fetchStats() {
     try {
@@ -36,7 +46,7 @@
       }
       
       // Fetch top stations (always, for leaderboard)
-      topStations = await safeFetch(`${API_BASE}/prices/analytics/top-stations?fuel_type=${encodeURIComponent(fuelType)}&hours=${hours}&limit=${leaderboardOnly ? 10 : 3}`)
+      topStations = await safeFetch(`${API_BASE}/prices/analytics/top-stations?fuel_type=${encodeURIComponent(fuelType)}&hours=${hours}&limit=${leaderboardOnly ? 10 : 3}${weighted ? '&opening_hours_weighted=true' : ''}`)
       
       loading = false
     } catch (error) {
@@ -185,15 +195,25 @@
     
     {#if leaderboardOnly && topStations && topStations.length > 0}
       <div class="top-stations">
-        <h3>🏆 Top 10 Stations</h3>
+        <div class="lb-head">
+          <h3>🏆 Top 10 Stations</h3>
+          <label class="lb-toggle" title="Count 'cheapest X% of the time' only over the hours a station was open (had prices)">
+            <input type="checkbox" bind:checked={weighted} on:change={toggleWeighted} />
+            by opening hours
+          </label>
+        </div>
         <div class="stations-list">
           {#each topStations as station, index}
             <div class="station-card">
-              <div class="station-rank">#{index + 1}</div>
+              <div class="station-rank">{station.rank ? '#' + station.rank : '–'}</div>
               <div class="station-info">
                 <div class="station-name">{station.name}</div>
                 <div class="station-city">{station.city || station.brand}</div>
+                <div class="data-note">{station.hours_with_data} h · {station.days_with_data} d of data{#if station.enough_data && station.stability_days}{' · stability from ' + station.stability_days + ' d'}{/if}</div>
               </div>
+              {#if !station.enough_data}
+                <div class="no-data-note">Not enough data to rank (only {station.hours_with_data} of {station.window_hours} h). Avg €{station.avg_price}</div>
+              {:else}
               <div class="station-stats">
                 <div class="station-stat">
                   <span class="label">Avg Price:</span>
@@ -221,6 +241,7 @@
               <div class="volatility-bar">
                 <div class="volatility-fill" style="width: {swingBar(station)}%; background-color: {stabilityInfo(station).color}"></div>
               </div>
+              {/if}
             </div>
           {/each}
         </div>
@@ -479,6 +500,44 @@
   
   .station-stat.volatility .value {
     margin-left: 0.4rem;
+  }
+
+  .lb-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.5rem;
+  }
+
+  .lb-head h3 {
+    margin: 0;
+  }
+
+  .lb-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.75rem;
+    color: #8b949e;
+    cursor: pointer;
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 500;
+  }
+
+  .data-note {
+    color: #6e7681;
+    font-size: 0.7rem;
+    margin-top: 0.125rem;
+  }
+
+  .no-data-note {
+    grid-column: 1 / -1;
+    color: #8b949e;
+    font-size: 0.8rem;
+    font-style: italic;
   }
 
   .volatility-bar {
