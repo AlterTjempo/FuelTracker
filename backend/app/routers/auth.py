@@ -79,31 +79,46 @@ def hash_password(password: str) -> str:
 
 
 def create_access_token(user_id: str) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(
-        minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES
-    )
-    payload = {"sub": user_id, "exp": expire}
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": user_id,
+        "iat": int(now.timestamp()),
+        "exp": now + timedelta(minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES),
+    }
     return jwt.encode(
         payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM
     )
 
 
-def get_current_user(
-    token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
-) -> User | None:
+def _user_from_token(token: str | None, db: Session) -> User | None:
+    """Return the user for a valid, non-revoked token, else None."""
     if token is None:
         return None
     try:
         payload = jwt.decode(
             token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM]
         )
-        user_id = payload.get("sub")
-        if user_id is None:
-            return None
     except JWTError:
         return None
-    user = db.query(User).filter(User.id == user_id).first()
+    user_id = payload.get("sub")
+    if user_id is None:
+        return None
+    try:
+        user = db.query(User).filter(User.id == uuid.UUID(user_id)).first()
+    except ValueError:
+        return None
+    if user is None:
+        return None
+    changed = user.password_changed_at
+    if changed is not None and payload.get("iat", 0) < int(changed.timestamp()):
+        return None  # issued before the last password change
     return user
+
+
+def get_current_user(
+    token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
+) -> User | None:
+    return _user_from_token(token, db)
 
 
 def require_current_user(
@@ -113,23 +128,10 @@ def require_current_user(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated"
         )
-    try:
-        payload = jwt.decode(
-            token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM]
-        )
-        user_id = payload.get("sub")
-        if user_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
-            )
-    except JWTError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
-        )
-    user = db.query(User).filter(User.id == user_id).first()
+    user = _user_from_token(token, db)
     if user is None:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found"
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token"
         )
     return user
 
@@ -324,7 +326,9 @@ async def update_profile(
 
 
 @router.post("/me/password")
+@limiter.limit("10/minute")
 async def change_password(
+    request: Request,
     body: ChangePasswordRequest,
     user: User = Depends(require_current_user),
     db: Session = Depends(get_db),
@@ -334,6 +338,18 @@ async def change_password(
     password_errors = validate_password(body.new_password)
     if password_errors:
         raise HTTPException(status_code=400, detail="; ".join(password_errors))
+    if verify_password(body.new_password, user.hashed_password):
+        raise HTTPException(
+            status_code=400,
+            detail="New password must differ from the current password",
+        )
     user.hashed_password = hash_password(body.new_password)
+    # Revoke every token issued before now (other devices/sessions), then hand
+    # this session a fresh one so the user stays logged in.
+    user.password_changed_at = datetime.now(timezone.utc)
     db.commit()
-    return {"message": "Password updated successfully"}
+    return {
+        "message": "Password updated successfully",
+        "access_token": create_access_token(str(user.id)),
+        "token_type": "bearer",
+    }

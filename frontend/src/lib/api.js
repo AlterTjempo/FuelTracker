@@ -94,11 +94,14 @@ export async function updateProfile({ username, email }) {
 }
 
 export async function changePassword(currentPassword, newPassword) {
-  return safeFetch(`${API_BASE}/auth/me/password`, {
+  const result = await safeFetch(`${API_BASE}/auth/me/password`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
   });
+  // The server revokes all older tokens on a password change and returns a fresh one.
+  if (result?.access_token) setToken(result.access_token);
+  return result;
 }
 
 export async function getAdminTrafficSummary(days = 30) {
@@ -125,6 +128,37 @@ export async function addFavorite(stationId) {
 
 export async function removeFavorite(stationId) {
   return safeFetch(`${API_BASE}/favorites/${stationId}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  });
+}
+
+// --- Outlook (forecast + market context) ---
+
+export function getForecast(fuelType) {
+  return safeFetch(`${API_BASE}/insights/forecast?fuel_type=${encodeURIComponent(fuelType)}`);
+}
+
+export function getMarketContext(fuelType) {
+  return safeFetch(`${API_BASE}/insights/market?fuel_type=${encodeURIComponent(fuelType)}`);
+}
+
+// --- Savings ---
+
+export function getSavings() {
+  return safeFetch(`${API_BASE}/savings`, { headers: authHeaders() });
+}
+
+export function addRefuel(entry) {
+  return safeFetch(`${API_BASE}/savings`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(entry),
+  });
+}
+
+export function deleteRefuel(id) {
+  return safeFetch(`${API_BASE}/savings/${id}`, {
     method: 'DELETE',
     headers: authHeaders(),
   });

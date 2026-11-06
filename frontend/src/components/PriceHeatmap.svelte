@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte'
+  import { poll } from '../lib/poll.js'
   import API_BASE, { safeFetch } from '../lib/api.js'
 
   export let fuelType = 'e5'
@@ -61,7 +62,7 @@
 
   onMount(() => {
     fetchHeatmap()
-    const iv = setInterval(fetchHeatmap, 5 * 60 * 1000)
+    const iv = poll(fetchHeatmap, 5 * 60 * 1000)
     return () => clearInterval(iv)
   })
 
