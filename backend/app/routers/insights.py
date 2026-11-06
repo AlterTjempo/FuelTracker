@@ -15,12 +15,15 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+import analytics_config as cfg
 from cache import cached, refresh
 from database import SessionLocal
 from database import get_db
 from limiter import limiter
+from services.brand_pattern import analyse as analyse_brands
+from services.brand_pattern import group_brands
 from services.forecast_model import build_trend_forecast
-from models import EnergyNews, FuelPrice, MarketPrice, OilPrice
+from models import EnergyNews, FuelPrice, MarketPrice, OilPrice, Station
 
 router = APIRouter()
 
@@ -127,6 +130,33 @@ def _daily_levels(days: dict) -> dict:
         d: _mean([price - shape.get(hour, 0.0) for hour, price in hrs.items()])
         for d, hrs in days.items()
     }
+
+
+BRAND_CACHE_SECONDS = 3600
+
+
+def _compute_brand_patterns(db: Session, fuel_type: str) -> dict:
+    """Compare the hour-of-day pattern (jump size and timing) between brand groups."""
+    column = FUEL_COLUMNS[fuel_type]
+    since = datetime.now(timezone.utc) - timedelta(days=cfg.BRAND_PATTERN_DAYS)
+    group_of = group_brands(dict(db.query(Station.id, Station.brand).all()))
+    local_hour = func.date_trunc("hour", func.timezone(TZ_NAME, FuelPrice.timestamp))
+    per_station_hour = (
+        db.query(FuelPrice.station_id, local_hour, func.avg(column))
+        .filter(FuelPrice.timestamp >= since, column.isnot(None))
+        .group_by(FuelPrice.station_id, local_hour)
+        .all()
+    )
+    acc: dict = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
+    for sid, hour, value in per_station_hour:
+        acc[group_of.get(sid, "Other")][hour.date()][hour.hour].append(float(value))
+    groups = {
+        g: {d: {h: _mean(v) for h, v in hrs.items()} for d, hrs in days.items()}
+        for g, days in acc.items()
+    }
+    result = analyse_brands(groups)
+    result["min_stations_per_brand"] = cfg.BRAND_MIN_STATIONS
+    return result
 
 
 def _compute_forecast(db: Session, fuel_type: str):
@@ -239,7 +269,7 @@ def _compute_forecast(db: Session, fuel_type: str):
     for rank, i in enumerate(order, start=1):
         f = forecast[i]
         f["rank"] = rank
-        margin = max(0.3, f["uncertainty_cents"])
+        margin = max(cfg.WEEKDAY_MIN_OFFSET_CENTS, f["uncertainty_cents"])
         f["label"] = (
             "cheaper"
             if f["offset_cents"] < -margin
@@ -248,6 +278,25 @@ def _compute_forecast(db: Session, fuel_type: str):
 
     result["insufficient_data"] = False
     result["forecast"] = forecast
+    # The hour pattern is the headline: pooled over all weekdays (a weekday only matters if significant).
+    pooled: dict = defaultdict(list)
+    for per_hour in hour_dev.values():
+        for hour, pairs in per_hour.items():
+            pooled[hour].extend(pairs)
+    profile = {
+        h: _wstats(v)[0] * 100
+        for h, v in pooled.items()
+        if len(v) >= MIN_SAMPLES_PER_WEEKDAY * 7
+    }
+    if profile:
+        best_h, worst_h = min(profile, key=profile.get), max(profile, key=profile.get)
+        result["hour_pattern"] = {
+            "best_hour": best_h,
+            "worst_hour": worst_h,
+            "spread_cents": round(profile[worst_h] - profile[best_h], 2),
+            "profile_cents": {str(h): round(v, 2) for h, v in sorted(profile.items())},
+        }
+    result["significant_weekdays"] = sum(1 for f in forecast if f["label"] != "average")
     # How much does each dimension matter? (lets the UI say "pick the hour, not the day")
     result["weekday_spread_cents"] = round(
         max(f["offset_cents"] for f in forecast)
@@ -272,9 +321,15 @@ def get_forecast(
 
     Uses up to a year of history, with recent weeks weighted more.
     """
-    return cached(
+    forecast = cached(
         ("forecast", fuel_type), CACHE_SECONDS, lambda: _compute_forecast(db, fuel_type)
     )
+    brands = cached(
+        ("brand-patterns", fuel_type),
+        BRAND_CACHE_SECONDS,
+        lambda: _compute_brand_patterns(db, fuel_type),
+    )
+    return {**forecast, "brand_patterns": brands}
 
 
 # --- Market context: oil + news -------------------------------------------

@@ -96,27 +96,32 @@
   $: verdict = headline ? VERDICT[headline.direction] : null
 
   // ---------- best time to refuel ----------
-  function mode(values) {
-    const counts = {}
-    for (const v of values) if (v !== null && v !== undefined) counts[v] = (counts[v] || 0) + 1
-    const best = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]
-    return best ? Number(best[0]) : null
-  }
-
   $: forecastOk = forecast && !forecast.insufficient_data
-  $: bestHour = forecastOk ? mode(forecast.forecast.map((d) => d.best_hour)) : null
-  $: worstHour = forecastOk ? mode(forecast.forecast.map((d) => d.worst_hour)) : null
+  // The hour pattern (pooled over all weekdays) is the headline; weekdays are secondary.
+  $: bestHour = forecastOk ? forecast.hour_pattern?.best_hour ?? null : null
+  $: worstHour = forecastOk ? forecast.hour_pattern?.worst_hour ?? null : null
+  $: hourSpread = forecastOk ? forecast.hour_pattern?.spread_cents ?? forecast.hour_spread_cents : null
 
-  function remainingBest(day) {
+  // Brands differ in the size (not the timing) of the noon jump: show the range, one line.
+  $: brandRange = (() => {
+    const b = forecast?.brand_patterns
+    if (!b?.brands_differ) return null
+    const gs = b.groups.filter((g) => g.jump_cents !== null)
+    if (gs.length < 2) return null
+    const sorted = [...gs].sort((x, y) => x.jump_cents - y.jump_cents)
+    return { min: sorted[0], max: sorted[sorted.length - 1] }
+  })()
+
+  function remainingBest(profile) {
     const nowH = Number(new Date().toLocaleString('en-GB', { hour: '2-digit', hour12: false, timeZone: 'Europe/Berlin' }))
-    const entries = Object.entries(day.hour_offsets_cents || {})
+    const entries = Object.entries(profile || {})
       .map(([h, v]) => [Number(h), v])
       .filter(([h]) => h >= nowH)
     if (!entries.length) return null
     entries.sort((a, b) => a[1] - b[1])
     return entries[0][0]
   }
-  $: todayBest = forecastOk && forecast.forecast[0]?.date === todayIso ? remainingBest(forecast.forecast[0]) : null
+  $: todayBest = forecastOk ? remainingBest(forecast.hour_pattern?.profile_cents) : null
 
   $: maxAbsOffset = forecastOk ? Math.max(0.5, ...forecast.forecast.map((d) => Math.abs(d.offset_cents))) : 1
 
@@ -239,58 +244,41 @@
           </div>
           <div class="tile">
             <span class="tile-label">Typical difference</span>
-            <span class="tile-value">~{forecast.hour_spread_cents}<small>¢/L</small></span>
-            <span class="tile-sub">weekday matters only ~{forecast.weekday_spread_cents}¢/L</span>
+            <span class="tile-value">~{hourSpread}<small>¢/L</small></span>
+            {#if brandRange}
+              <span class="tile-sub">{brandRange.min.jump_cents}¢ at {brandRange.min.group} to {brandRange.max.jump_cents}¢ at {brandRange.max.group}</span>
+            {/if}
           </div>
         </div>
+        <p class="caption">
+          Hour pattern from {forecast.days_used} days of data (confidence: <strong>{forecast.confidence}</strong>; recent weeks weigh more).
+          Weekdays are only shown when they clear their standard error and 0.3¢.
+        </p>
 
-        <h4>Next 7 days vs. weekly average</h4>
-        <ul class="week">
-          {#each forecast.forecast as day, i}
-            <li class:today={i === 0}>
-              <span class="w-day">{i === 0 ? 'Today' : day.weekday.slice(0, 3)} <em>{dayShort(day.date)}</em></span>
-              <span class="w-bar" aria-hidden="true">
-                <span class="w-axis"></span>
-                <span
-                  class="w-fill"
-                  class:neg={day.offset_cents < 0}
-                  class:muted={day.label === 'average'}
-                  style="width: {(Math.abs(day.offset_cents) / maxAbsOffset) * 50}%; {day.offset_cents < 0 ? 'right: 50%' : 'left: 50%'}"
-                ></span>
-              </span>
-              <span class="w-val" class:good={day.label === 'cheaper'} class:warnc={day.label === 'pricier'}>{cents(day.offset_cents)}</span>
-              <span class="w-hour">cheapest {hourLabel(i === 0 && todayBest !== null ? todayBest : day.best_hour)}</span>
-            </li>
-          {/each}
-        </ul>
-
-        <details class="fold inner">
-          <summary>Full daily breakdown</summary>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr><th>Day</th><th>Vs. average</th><th>Assessment</th><th>Cheapest</th><th>Priciest</th><th>Samples</th></tr>
-              </thead>
-              <tbody>
-                {#each forecast.forecast as day}
-                  <tr>
-                    <td>{dayLong(day.date)}</td>
-                    <td>{cents(day.offset_cents)} <span class="muted">±{day.uncertainty_cents.toFixed(1)}</span></td>
-                    <td>{day.label === 'cheaper' ? 'Cheaper than usual' : day.label === 'pricier' ? 'Pricier than usual' : 'About average'}</td>
-                    <td>{hourLabel(day.best_hour)}</td>
-                    <td>{hourLabel(day.worst_hour)}</td>
-                    <td>{day.samples}</td>
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
-          </div>
-          <p class="caption">
-            Pattern confidence: <strong>{forecast.confidence}</strong>
-            ({forecast.days_used} usable days, {forecast.first_day} → {forecast.last_day}; recent weeks weigh more).
-            {forecast.disclaimer}
-          </p>
-        </details>
+        {#if forecast.significant_weekdays > 0}
+          <details class="fold inner">
+            <summary>Weekday differences</summary>
+            <ul class="week">
+              {#each forecast.forecast as day, i}
+                <li class:today={i === 0}>
+                  <span class="w-day">{i === 0 ? 'Today' : day.weekday.slice(0, 3)} <em>{dayShort(day.date)}</em></span>
+                  <span class="w-bar" aria-hidden="true">
+                    <span class="w-axis"></span>
+                    <span
+                      class="w-fill"
+                      class:neg={day.offset_cents < 0}
+                      class:muted={day.label === 'average'}
+                      style="width: {(Math.abs(day.offset_cents) / maxAbsOffset) * 50}%; {day.offset_cents < 0 ? 'right: 50%' : 'left: 50%'}"
+                    ></span>
+                  </span>
+                  <span class="w-val" class:good={day.label === 'cheaper'} class:warnc={day.label === 'pricier'}>{cents(day.offset_cents)}</span>
+                  <span class="w-hour">{day.label === 'cheaper' ? 'cheaper than usual' : day.label === 'pricier' ? 'pricier than usual' : 'about average'}</span>
+                </li>
+              {/each}
+            </ul>
+            <p class="caption">±{forecast.forecast[0].uncertainty_cents}¢/L typical uncertainty per weekday. {forecast.disclaimer}</p>
+          </details>
+        {/if}
       {/if}
     </section>
 

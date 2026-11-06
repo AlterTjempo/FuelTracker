@@ -144,3 +144,19 @@ HOURLY_MIN_HOURS = 20  # default: hours a day needs to be used
 HOURLY_SHAPE_DAYS = 28  # default: history for the hour-of-day shape
 HOURLY_SHAPE_HALF_LIFE_DAYS = 14  # default: recency weighting of the shape
 HOURLY_MIN_SHAPE_DAYS = 7  # default: days needed to estimate the shape
+
+# ------------------------------------------------- Best time / brand pattern ----
+BRAND_MIN_STATIONS = (
+    3  # configurable (requested): brands with fewer stations -> "other"
+)
+BRAND_PATTERN_DAYS = 120  # default: history used for the per-brand hour shape
+BRAND_MAX_JUMP_DIFF_CENTS = (
+    1.0  # requested: below this the single area-wide pattern is kept
+)
+BRAND_MAX_TIMING_DIFF_HOURS = (
+    1.0  # requested: below this the single area-wide pattern is kept
+)
+BRAND_MIN_DAYS = 14  # default: complete days a brand group needs to be analysed
+WEEKDAY_MIN_OFFSET_CENTS = (
+    0.3  # existing rule: a weekday must clear 0.3 cents and its standard error
+)
