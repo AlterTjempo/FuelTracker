@@ -23,7 +23,7 @@ services:
     environment:
       DATABASE_URL: postgresql://fuel:fuel@db:5432/fuelprices
     ports:
-      - "8001:8000"
+      - "8000:8000"
     volumes:
       - ./backend/app:/app
 
@@ -36,12 +36,7 @@ services:
     env_file:
       - config.env
     ports:
-      - "5173:5173"
-    volumes:
-      - ./frontend/src:/app/src
-      - ./frontend/index.html:/app/index.html
-      - ./frontend/fuel.svg:/app/fuel.svg
-      - /app/node_modules
+      - "5173:80"
 
 volumes:
   pgdata:
