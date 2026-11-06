@@ -100,8 +100,31 @@ class DataCollector:
                     else:
                         print(f"API Error: {data.get('message', 'Unknown error')}")
 
+                except httpx.HTTPStatusError as e:
+                    # Never print the exception itself: it contains the URL with the API key.
+                    code = e.response.status_code
+                    kind = (
+                        "auth error, check TANKERKONIG_API_KEY"
+                        if code in (401, 403)
+                        else (
+                            "rate limited"
+                            if code == 429
+                            else (
+                                "upstream outage, temporary"
+                                if code >= 500
+                                else "HTTP error"
+                            )
+                        )
+                    )
+                    print(f"Tankerkonig prices request failed (HTTP {code}, {kind})")
+                    continue
+                except (httpx.TimeoutException, httpx.TransportError) as e:
+                    print(
+                        f"Tankerkonig prices network error ({type(e).__name__}); temporary"
+                    )
+                    continue
                 except Exception as e:
-                    print(f"Error fetching prices: {e}")
+                    print(f"Unexpected error fetching prices: {type(e).__name__}")
                     continue
 
         return {"ok": True, "prices": all_prices} if all_prices else None

@@ -310,7 +310,7 @@
       {#if zoom}
         Zoomed: {zoomLabel}{bucketMinutes === 15 ? ' · 15-min data' : ''}
       {:else}
-        Drag on the chart to zoom into a period
+        🔍 Drag to zoom
       {/if}
     </span>
     <div class="tools">

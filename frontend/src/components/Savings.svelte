@@ -17,6 +17,16 @@
   let stationId = ''
   let saving = false
   let formError = ''
+  let referenceSource = readPref('fuel_ref_source') || 'area'
+  let manualRef = ''
+  let nl = null // latest Dutch average from CBS
+
+  function readPref(key) {
+    try { return localStorage.getItem(key) } catch { return null }
+  }
+
+  $: try { localStorage.setItem('fuel_ref_source', referenceSource) } catch { /* ignore */ }
+  $: nlPrice = nl && nl.available ? (fuelType === 'diesel' ? nl.diesel : nl.euro95) : null
 
   function localNowValue() {
     const d = new Date()
@@ -45,6 +55,12 @@
     }
   }
 
+  async function loadNl() {
+    try {
+      nl = await safeFetch(`${API_BASE}/savings/nl-average`)
+    } catch { /* optional */ }
+  }
+
   async function loadStations() {
     try {
       const rows = await safeFetch(`${API_BASE}/stations/?limit=1000`)
@@ -58,9 +74,16 @@
     const p = parseFloat(String(price).replace(',', '.'))
     if (!(l > 0 && l <= 200)) { formError = 'Enter litres between 0 and 200'; return }
     if (!(p >= 0.5 && p <= 5)) { formError = 'Enter the price per litre in € (e.g. 1.899)'; return }
+    let manual = null
+    if (referenceSource === 'manual') {
+      manual = parseFloat(String(manualRef).replace(',', '.'))
+      if (!(manual >= 0.5 && manual <= 5)) { formError = 'Enter your reference price in € per litre (e.g. 2.05)'; return }
+    }
     saving = true
     try {
       await addRefuel({
+        reference_source: referenceSource,
+        manual_reference_price: manual,
         fuel_type: fuelType,
         liters: l,
         price_per_liter: p,
@@ -69,6 +92,7 @@
       })
       liters = ''
       price = ''
+      manualRef = ''
       when = localNowValue()
       await load()
     } catch (e) {
@@ -91,6 +115,7 @@
   onMount(() => {
     load()
     loadStations()
+    loadNl()
   })
 
   const eur = (n) => `€${n.toFixed(2)}`
@@ -115,7 +140,7 @@
       <div class="tile"><span class="v">{eur(data.summary.total_spent)}</span><span class="l">spent</span></div>
       <div class="tile highlight" class:neg={data.summary.saved < 0}>
         <span class="v">{data.summary.saved < 0 ? '−' : ''}{eur(Math.abs(data.summary.saved))}</span>
-        <span class="l">{data.summary.saved < 0 ? 'above area average' : 'saved vs. area average'}</span>
+        <span class="l">{data.summary.saved < 0 ? 'above your references' : 'saved vs. your references'}</span>
       </div>
     </div>
     <p class="method">
@@ -145,6 +170,28 @@
       <label>When
         <input type="datetime-local" bind:value={when} max={localNowValue()} />
       </label>
+      <label class="wide">Compare against
+        <select bind:value={referenceSource}>
+          <option value="area">Area average (tracked stations, ±1 h)</option>
+          <option value="nl">Dutch national average (CBS)</option>
+          <option value="manual">My own reference price</option>
+        </select>
+      </label>
+      {#if referenceSource === 'manual'}
+        <label class="wide">Reference price (€ per litre)
+          <input type="text" inputmode="decimal" placeholder="e.g. 2.05" bind:value={manualRef} />
+        </label>
+      {:else if referenceSource === 'nl'}
+        <p class="ref-note wide">
+          {#if nlPrice}
+            Latest Dutch average for {fuelType === 'diesel' ? 'diesel' : 'Euro95 (used for E5 and E10)'}:
+            <strong>€{nlPrice.toFixed(3)}</strong> ({nl.day}). Each refuel is compared with the
+            Dutch average of its own day; very recent days may not be published yet.
+          {:else}
+            Dutch prices are not available right now. Use your own reference price instead.
+          {/if}
+        </p>
+      {/if}
       <label class="wide">Station (optional)
         <select bind:value={stationId}>
           <option value="">–</option>
@@ -172,10 +219,10 @@
           </div>
           <div class="result" class:neg={s.saved !== null && s.saved < 0}>
             {#if s.saved === null}
-              <span class="muted">no reference price for this time</span>
+              <span class="muted">no {s.reference_label} for this time</span>
             {:else}
               {s.saved >= 0 ? 'Saved ' : 'Paid '}{eur(Math.abs(s.saved))}
-              <span class="muted">(area avg €{s.reference_price.toFixed(3)})</span>
+              <span class="muted">vs. {s.reference_label} €{s.reference_price.toFixed(3)}</span>
             {/if}
           </div>
           <button class="del" on:click={() => remove(s.id)} aria-label="Delete refuel">✕</button>
@@ -208,6 +255,8 @@
     padding: 0.5rem 0.625rem; font-size: 1rem; min-height: 2.5rem; font-family: inherit;
   }
   input:focus, select:focus { outline: 2px solid #3b82f6; outline-offset: 1px; }
+  .ref-note { color: #8b949e; font-size: 0.8rem; line-height: 1.4; margin: 0; }
+  .ref-note strong { color: #e6edf3; }
   .form-error { color: #f85149; font-size: 0.85rem; margin-bottom: 0.5rem; }
   .primary { background: #3b82f6; border-color: #3b82f6; color: #fff; }
   .primary:hover { background: #2563eb; }

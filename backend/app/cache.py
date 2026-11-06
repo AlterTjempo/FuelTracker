@@ -27,6 +27,13 @@ def cached(key: tuple, ttl_seconds: float, compute: Callable[[], Any]) -> Any:
     return value
 
 
+def refresh(key: tuple, ttl_seconds: float, compute: Callable[[], Any]) -> Any:
+    """Recompute and store unconditionally (used by scheduled warm-up jobs)."""
+    value = compute()
+    _STORE[key] = (time.monotonic() + ttl_seconds, value)
+    return value
+
+
 def clear() -> None:
     _STORE.clear()
 

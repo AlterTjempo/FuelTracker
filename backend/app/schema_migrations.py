@@ -5,7 +5,19 @@ def apply_schema_migrations(engine) -> None:
     statements = [
         "ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE",
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)",
+        """
+        CREATE TABLE IF NOT EXISTS market_prices (
+            id SERIAL PRIMARY KEY,
+            timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
+            series VARCHAR NOT NULL,
+            source VARCHAR NOT NULL,
+            value DOUBLE PRECISION NOT NULL
+        )
+        """,
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_market_series_time ON market_prices (series, timestamp)",
         "ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMP WITH TIME ZONE",
+        "ALTER TABLE IF EXISTS refuel_logs ADD COLUMN IF NOT EXISTS reference_source VARCHAR NOT NULL DEFAULT 'area'",
+        "ALTER TABLE IF EXISTS refuel_logs ADD COLUMN IF NOT EXISTS manual_reference_price DOUBLE PRECISION",
         """
         CREATE TABLE IF NOT EXISTS visitor_location_cache (
             id SERIAL PRIMARY KEY,

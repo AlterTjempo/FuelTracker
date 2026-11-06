@@ -15,10 +15,15 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from cache import cached
+import analytics_config as cfg
+from cache import cached, refresh
+from database import SessionLocal
 from database import get_db
 from limiter import limiter
-from models import EnergyNews, FuelPrice, OilPrice
+from services.brand_pattern import analyse as analyse_brands
+from services.brand_pattern import group_brands
+from services.forecast_model import build_trend_forecast
+from models import EnergyNews, FuelPrice, MarketPrice, OilPrice, Station
 
 router = APIRouter()
 
@@ -36,7 +41,8 @@ WEEKDAYS = [
 
 FUEL_COLUMNS = {"e5": FuelPrice.e5, "e10": FuelPrice.e10, "diesel": FuelPrice.diesel}
 
-LOOKBACK_DAYS = 120
+LOOKBACK_DAYS = 365  # use up to a year of history
+HALF_LIFE_DAYS = 120  # a day's weight halves every 120 days (recent weeks count more)
 MIN_HOURS_PER_DAY = 18  # a day needs this many well-covered hours to be used
 MIN_SAMPLES_PER_WEEKDAY = 3  # ~3 weeks of data before we show a pattern
 CACHE_SECONDS = 300
@@ -63,6 +69,17 @@ def _pearson(xs, ys):
     if sx == 0 or sy == 0:
         return None
     return sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / (sx * sy)
+
+
+def _wstats(pairs):
+    """Recency-weighted mean and standard error of [(age_days, value), ...]."""
+    ws = [0.5 ** (age / HALF_LIFE_DAYS) for age, _ in pairs]
+    total = sum(ws)
+    m = sum(w * v for w, (_, v) in zip(ws, pairs)) / total
+    var = sum(w * (v - m) ** 2 for w, (_, v) in zip(ws, pairs)) / total
+    n_eff = total**2 / sum(w * w for w in ws)
+    se = math.sqrt(var / max(1.0, n_eff - 1)) if n_eff > 1 else 0.0
+    return m, se
 
 
 def _hourly_series(db: Session, column, since: datetime):
@@ -92,6 +109,56 @@ def _build_daily(hourly):
     return {d: hrs for d, hrs in days.items() if len(hrs) >= MIN_HOURS_PER_DAY}
 
 
+def _daily_levels(days: dict) -> dict:
+    """Daily price level that is robust to missing hours.
+
+    Prices jump ~10 cents around noon, so a plain average over whichever hours
+    happen to be present swings by about a cent depending on which hours are
+    missing. We learn the typical hour-of-day shape from (nearly) complete days
+    and average the shape-corrected hourly prices instead.
+    """
+    complete = [h for h in days.values() if len(h) >= 22]
+    if not complete:
+        return {d: _mean(list(h.values())) for d, h in days.items()}
+    shape_samples = defaultdict(list)
+    for hrs in complete:
+        m = _mean(list(hrs.values()))
+        for hour, price in hrs.items():
+            shape_samples[hour].append(price - m)
+    shape = {hour: _mean(v) for hour, v in shape_samples.items()}
+    return {
+        d: _mean([price - shape.get(hour, 0.0) for hour, price in hrs.items()])
+        for d, hrs in days.items()
+    }
+
+
+BRAND_CACHE_SECONDS = 3600
+
+
+def _compute_brand_patterns(db: Session, fuel_type: str) -> dict:
+    """Compare the hour-of-day pattern (jump size and timing) between brand groups."""
+    column = FUEL_COLUMNS[fuel_type]
+    since = datetime.now(timezone.utc) - timedelta(days=cfg.BRAND_PATTERN_DAYS)
+    group_of = group_brands(dict(db.query(Station.id, Station.brand).all()))
+    local_hour = func.date_trunc("hour", func.timezone(TZ_NAME, FuelPrice.timestamp))
+    per_station_hour = (
+        db.query(FuelPrice.station_id, local_hour, func.avg(column))
+        .filter(FuelPrice.timestamp >= since, column.isnot(None))
+        .group_by(FuelPrice.station_id, local_hour)
+        .all()
+    )
+    acc: dict = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
+    for sid, hour, value in per_station_hour:
+        acc[group_of.get(sid, "Other")][hour.date()][hour.hour].append(float(value))
+    groups = {
+        g: {d: {h: _mean(v) for h, v in hrs.items()} for d, hrs in days.items()}
+        for g, days in acc.items()
+    }
+    result = analyse_brands(groups)
+    result["min_stations_per_brand"] = cfg.BRAND_MIN_STATIONS
+    return result
+
+
 def _compute_forecast(db: Session, fuel_type: str):
     column = FUEL_COLUMNS[fuel_type]
     now = datetime.now(timezone.utc)
@@ -117,7 +184,7 @@ def _compute_forecast(db: Session, fuel_type: str):
     if not days:
         return result
 
-    daily_mean = {d: _mean(list(h.values())) for d, h in days.items()}
+    daily_mean = _daily_levels(days)
 
     # Day-of-week effect = daily mean minus the local weekly baseline, which
     # removes slow level changes (e.g. oil-driven moves) from the weekday signal.
@@ -129,14 +196,14 @@ def _compute_forecast(db: Session, fuel_type: str):
             if (d + timedelta(days=k)) in daily_mean
         ]
         if len(window) >= 5:
-            dow_dev[d.weekday()].append(m - _mean(window))
+            dow_dev[d.weekday()].append(((today - d).days, m - _mean(window)))
 
     # Hour-of-day effect per weekday: hourly price minus that day's mean.
     hour_dev = defaultdict(lambda: defaultdict(list))
     for d, hrs in days.items():
         dm = daily_mean[d]
         for hour, price in hrs.items():
-            hour_dev[d.weekday()][hour].append(price - dm)
+            hour_dev[d.weekday()][hour].append(((today - d).days, price - dm))
 
     if any(len(dow_dev[w]) < MIN_SAMPLES_PER_WEEKDAY for w in range(7)):
         result["samples_per_weekday"] = [len(dow_dev[w]) for w in range(7)]
@@ -164,10 +231,11 @@ def _compute_forecast(db: Session, fuel_type: str):
         d = today + timedelta(days=i)
         w = d.weekday()
         devs = dow_dev[w]
-        offset = _mean(devs) * 100  # cents vs. weekly average
-        se = _std(devs) / math.sqrt(len(devs)) * 100
+        mean_dev, se_dev = _wstats(devs)
+        offset = mean_dev * 100  # cents vs. weekly average
+        se = se_dev * 100
         hours = {
-            h: _mean(v)
+            h: _wstats(v)[0]
             for h, v in hour_dev[w].items()
             if len(v) >= MIN_SAMPLES_PER_WEEKDAY
         }
@@ -201,7 +269,7 @@ def _compute_forecast(db: Session, fuel_type: str):
     for rank, i in enumerate(order, start=1):
         f = forecast[i]
         f["rank"] = rank
-        margin = max(0.3, f["uncertainty_cents"])
+        margin = max(cfg.WEEKDAY_MIN_OFFSET_CENTS, f["uncertainty_cents"])
         f["label"] = (
             "cheaper"
             if f["offset_cents"] < -margin
@@ -210,6 +278,35 @@ def _compute_forecast(db: Session, fuel_type: str):
 
     result["insufficient_data"] = False
     result["forecast"] = forecast
+    # The hour pattern is the headline: pooled over all weekdays (a weekday only matters if significant).
+    pooled: dict = defaultdict(list)
+    for per_hour in hour_dev.values():
+        for hour, pairs in per_hour.items():
+            pooled[hour].extend(pairs)
+    profile = {
+        h: _wstats(v)[0] * 100
+        for h, v in pooled.items()
+        if len(v) >= MIN_SAMPLES_PER_WEEKDAY * 7
+    }
+    if profile:
+        best_h, worst_h = min(profile, key=profile.get), max(profile, key=profile.get)
+        result["hour_pattern"] = {
+            "best_hour": best_h,
+            "worst_hour": worst_h,
+            "spread_cents": round(profile[worst_h] - profile[best_h], 2),
+            "profile_cents": {str(h): round(v, 2) for h, v in sorted(profile.items())},
+        }
+    result["significant_weekdays"] = sum(1 for f in forecast if f["label"] != "average")
+    # How much does each dimension matter? (lets the UI say "pick the hour, not the day")
+    result["weekday_spread_cents"] = round(
+        max(f["offset_cents"] for f in forecast)
+        - min(f["offset_cents"] for f in forecast),
+        2,
+    )
+    spreads = [
+        f["hour_spread_cents"] for f in forecast if f["hour_spread_cents"] is not None
+    ]
+    result["hour_spread_cents"] = round(_mean(spreads), 2) if spreads else None
     return result
 
 
@@ -220,10 +317,19 @@ def get_forecast(
     fuel_type: str = Query("e5", pattern="^(e5|e10|diesel)$"),
     db: Session = Depends(get_db),
 ):
-    """Weekday/hour price pattern for the coming 7 days (Europe/Berlin time)."""
-    return cached(
+    """Weekday/hour price pattern for the coming 7 days (Europe/Berlin time).
+
+    Uses up to a year of history, with recent weeks weighted more.
+    """
+    forecast = cached(
         ("forecast", fuel_type), CACHE_SECONDS, lambda: _compute_forecast(db, fuel_type)
     )
+    brands = cached(
+        ("brand-patterns", fuel_type),
+        BRAND_CACHE_SECONDS,
+        lambda: _compute_brand_patterns(db, fuel_type),
+    )
+    return {**forecast, "brand_patterns": brands}
 
 
 # --- Market context: oil + news -------------------------------------------
@@ -294,10 +400,7 @@ def _compute_market(db: Session, fuel_type: str):
     since = now - timedelta(days=LOOKBACK_DAYS)
     today = now.astimezone(TZ).date()
 
-    fuel_daily = {
-        d: _mean(list(h.values()))
-        for d, h in _build_daily(_hourly_series(db, column, since)).items()
-    }
+    fuel_daily = _daily_levels(_build_daily(_hourly_series(db, column, since)))
     oil_daily = _daily_oil(db, since)
 
     # Lag relationship on day-over-day *changes* (levels would correlate
@@ -414,3 +517,98 @@ def get_market_context(
     return cached(
         ("market", fuel_type), CACHE_SECONDS, lambda: _compute_market(db, fuel_type)
     )
+
+
+# --- Trend model ---------------------------------------------------------------
+
+TREND_LOOKBACK_DAYS = 730
+TREND_CACHE_SECONDS = 1800
+
+
+def _daily_news_scores(db: Session, since: datetime) -> dict:
+    """Keyword-weighted news pressure per local day (days without articles are absent)."""
+    rows = (
+        db.query(EnergyNews.published_at, EnergyNews.title, EnergyNews.summary)
+        .filter(EnergyNews.published_at >= since)
+        .all()
+    )
+    out: dict = {}
+    for published_at, title, summary in rows:
+        day = published_at.astimezone(TZ).date()
+        score, _ = _score_article(title, summary)
+        out[day] = out.get(day, 0) + score
+    return out
+
+
+def _daily_market(db: Session, since: datetime) -> dict:
+    """Daily mean of each market series (gasoil proxy, RBOB, EUR/USD, Brent USD) per Berlin day."""
+    day = func.date(func.timezone(TZ_NAME, MarketPrice.timestamp))
+    out: dict = defaultdict(dict)
+    for series, d, value in (
+        db.query(MarketPrice.series, day, func.avg(MarketPrice.value))
+        .filter(MarketPrice.timestamp >= since)
+        .group_by(MarketPrice.series, day)
+        .all()
+    ):
+        out[series][d] = float(value)
+    return dict(out)
+
+
+def _compute_trend(db: Session, fuel_type: str):
+    column = FUEL_COLUMNS[fuel_type]
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(days=TREND_LOOKBACK_DAYS)
+    days = _build_daily(_hourly_series(db, column, since))
+    price = _daily_levels(days)
+    oil = _daily_oil(db, since)
+    news = _daily_news_scores(db, since)
+    market = _daily_market(db, since)
+    result = build_trend_forecast(
+        price,
+        oil,
+        news,
+        now.astimezone(TZ).date(),
+        market=market,
+        hourly_days=days,
+    )
+    result["fuel_type"] = fuel_type
+    # The exact daily series the model uses, for charting (last 60 days; gaps stay gaps).
+    result["history"] = [
+        {"date": d.isoformat(), "price": round(price[d], 4)}
+        for d in sorted(price)
+        if (now.astimezone(TZ).date() - d).days <= 60
+    ]
+    result["disclaimer"] = (
+        "Statistical estimate of the area-average price, validated on past data. "
+        "Not a guarantee and not financial advice."
+    )
+    return result
+
+
+@router.get("/trend")
+@limiter.limit("20/minute")
+def get_trend_forecast(
+    request: Request,
+    fuel_type: str = Query("e5", pattern="^(e5|e10|diesel)$"),
+    db: Session = Depends(get_db),
+):
+    """Day-ahead price trend (1-7 days) from a backtested ridge model."""
+    return cached(
+        ("trend", fuel_type), TREND_CACHE_SECONDS, lambda: _compute_trend(db, fuel_type)
+    )
+
+
+def warm_trend_cache() -> None:
+    """Scheduled job: recompute the trend results so requests never wait ~10 s."""
+    for fuel_type in FUEL_COLUMNS:
+        db = SessionLocal()
+        try:
+            refresh(
+                ("trend", fuel_type),
+                TREND_CACHE_SECONDS,
+                lambda: _compute_trend(db, fuel_type),
+            )
+        except Exception as exc:  # never let a failed warm-up break the scheduler
+            print(f"[trend warm-up] {fuel_type}: {type(exc).__name__}")
+        finally:
+            db.close()

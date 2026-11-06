@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import hmac
 from hashlib import sha256
 from ipaddress import ip_address
 from urllib.parse import urlparse
@@ -9,6 +10,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from database import get_db
+from config import settings
+from limiter import client_ip as real_client_ip
 from limiter import limiter
 from models import TrafficEvent, VisitorLocationCache
 from routers.admin import invalidate_summary_cache
@@ -20,18 +23,6 @@ class PageViewRequest(BaseModel):
     page: str
     path: str = "/"
     referrer: str | None = None
-
-
-def _get_client_ip(request: Request) -> str:
-    forwarded_for = request.headers.get("x-forwarded-for", "")
-    if forwarded_for:
-        return forwarded_for.split(",")[0].strip()
-
-    real_ip = request.headers.get("x-real-ip")
-    if real_ip:
-        return real_ip.strip()
-
-    return request.client.host if request.client else "unknown"
 
 
 def _is_public_ip(value: str) -> bool:
@@ -63,7 +54,10 @@ def _normalize_source(referrer: str | None) -> str:
 
 
 async def _resolve_location(client_ip: str, db: Session) -> dict:
-    ip_hash = sha256(client_ip.encode("utf-8")).hexdigest()
+    # keyed hash: the stored value cannot be brute-forced back to an IPv4 address
+    ip_hash = hmac.new(
+        settings.JWT_SECRET_KEY.encode("utf-8"), client_ip.encode("utf-8"), sha256
+    ).hexdigest()
     cached = (
         db.query(VisitorLocationCache)
         .filter(VisitorLocationCache.ip_hash == ip_hash)
@@ -80,11 +74,13 @@ async def _resolve_location(client_ip: str, db: Session) -> dict:
             "longitude": cached.longitude,
         }
 
-    if not _is_public_ip(client_ip):
+    if not _is_public_ip(client_ip) or not settings.ENABLE_IP_GEOLOCATION:
+        # Private addresses, or the third-party lookup is disabled: nothing leaves the server.
+        private = not _is_public_ip(client_ip)
         location = {
-            "country": "Private Network",
+            "country": "Private Network" if private else "Not resolved",
             "region": None,
-            "city": "Local Traffic",
+            "city": "Local Traffic" if private else "Geolocation disabled",
             "latitude": None,
             "longitude": None,
         }
@@ -133,7 +129,7 @@ async def _resolve_location(client_ip: str, db: Session) -> dict:
 async def track_page_view(
     request: Request, body: PageViewRequest, db: Session = Depends(get_db)
 ):
-    location = await _resolve_location(_get_client_ip(request), db)
+    location = await _resolve_location(real_client_ip(request), db)
 
     event = TrafficEvent(
         page=body.page.strip()[:80] or "unknown",

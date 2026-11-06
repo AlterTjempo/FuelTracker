@@ -1,10 +1,10 @@
 from sqlalchemy import (
+    Date,
     Column,
     Integer,
     String,
     Float,
     Boolean,
-    DateTime,
     ForeignKey,
     Index,
 )
@@ -164,6 +164,10 @@ class RefuelLog(Base):
     liters = Column(Float, nullable=False)
     price_per_liter = Column(Float, nullable=False)
     fueled_at = Column(TIMESTAMP(timezone=True), nullable=False)
+    # What the user compares against: 'area' (tracked stations), 'nl' (CBS Dutch
+    # average) or 'manual' (their own reference price, stored below).
+    reference_source = Column(String, nullable=False, default="area")
+    manual_reference_price = Column(Float, nullable=True)
     created_at = Column(
         TIMESTAMP(timezone=True),
         nullable=False,
@@ -173,6 +177,34 @@ class RefuelLog(Base):
     station = relationship("Station")
 
     __table_args__ = (Index("idx_refuel_user_time", "user_id", "fueled_at"),)
+
+
+class MarketPrice(Base):
+    """Refined products, Brent (USD) and EUR/USD (see analytics_config.MARKET_SERIES)."""
+
+    __tablename__ = "market_prices"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    timestamp = Column(TIMESTAMP(timezone=True), nullable=False)
+    series = Column(
+        String, nullable=False
+    )  # e.g. gasoil_proxy, rbob, eurusd, brent_usd
+    source = Column(String, nullable=False)  # e.g. yahoo:HO=F or yahoo:HO=F:daily
+    value = Column(Float, nullable=False)
+
+    __table_args__ = (
+        Index("idx_market_series_time", "series", "timestamp", unique=True),
+    )
+
+
+class NlFuelPrice(Base):
+    """Dutch national average pump prices (CBS open data), one row per day."""
+
+    __tablename__ = "nl_fuel_prices"
+
+    day = Column(Date, primary_key=True)
+    euro95 = Column(Float, nullable=True)  # EUR/L, Dutch equivalent of E10
+    diesel = Column(Float, nullable=True)  # EUR/L
 
 
 class VisitorLocationCache(Base):

@@ -110,6 +110,14 @@ export async function getAdminTrafficSummary(days = 30) {
   });
 }
 
+export async function getAdminSystem() {
+  return safeFetch(`${API_BASE}/admin/system`, { headers: authHeaders() });
+}
+
+export async function getAdminUsers() {
+  return safeFetch(`${API_BASE}/admin/users`, { headers: authHeaders() });
+}
+
 // --- Favorites ---
 
 export async function getFavorites() {
@@ -137,6 +145,10 @@ export async function removeFavorite(stationId) {
 
 export function getForecast(fuelType) {
   return safeFetch(`${API_BASE}/insights/forecast?fuel_type=${encodeURIComponent(fuelType)}`);
+}
+
+export function getTrend(fuelType) {
+  return safeFetch(`${API_BASE}/insights/trend?fuel_type=${encodeURIComponent(fuelType)}`);
 }
 
 export function getMarketContext(fuelType) {

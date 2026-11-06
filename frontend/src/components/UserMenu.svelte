@@ -2,11 +2,12 @@
   import { currentUser } from '../lib/auth.js';
   import AuthModal from './AuthModal.svelte';
   import SettingsModal from './SettingsModal.svelte';
-  import AdminModal from './AdminModal.svelte';
 
   let showModal = false;
   let showSettings = false;
+  // The admin screens (and the Leaflet map they use) are only downloaded when an admin opens them.
   let showAdmin = false;
+  let AdminModal = null;
   let showDropdown = false;
 
   function handleLogout() {
@@ -20,7 +21,10 @@
   }
 
   function openAdmin() {
-    showAdmin = true;
+    import('./AdminModal.svelte').then((m) => {
+      AdminModal = m.default;
+      showAdmin = true;
+    });
     showDropdown = false;
   }
 
@@ -82,8 +86,8 @@
   <SettingsModal on:close={() => showSettings = false} />
 {/if}
 
-{#if showAdmin}
-  <AdminModal on:close={() => showAdmin = false} />
+{#if showAdmin && AdminModal}
+  <svelte:component this={AdminModal} on:close={() => showAdmin = false} />
 {/if}
 
 <style>

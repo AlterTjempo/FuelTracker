@@ -8,10 +8,6 @@ class Settings(BaseSettings):
     TANKERKONIG_API_KEY: str
     TANKERKONIG_BASE_URL: str = "https://creativecommons.tankerkoenig.de/json"
 
-    # Optional: EIA API key for Brent crude prices.
-    # If not set, falls back to Yahoo Finance public endpoint.
-    OIL_PRICE_API_KEY: Optional[str] = None
-
     # Location settings from config.env
     LATITUDE: float = 52.52
     LONGITUDE: float = 13.405
@@ -20,8 +16,12 @@ class Settings(BaseSettings):
     # CORS Settings — default to restrictive; override in config.env
     ALLOWED_ORIGINS: str = "http://localhost:5173"
 
-    # Enable /docs and /redoc endpoints (disable in production)
-    ENABLE_DOCS: bool = True
+    # Enable /docs, /redoc and /openapi.json (off by default; true for development only)
+    ENABLE_DOCS: bool = False
+
+    # Look up visitor locations via the third-party service ipapi.co. This sends visitor
+    # IP addresses to that service, so it is off by default (the admin map stays empty).
+    ENABLE_IP_GEOLOCATION: bool = False
 
     # JWT Authentication
     JWT_SECRET_KEY: str = "overwritten-in-config-env-change-me"

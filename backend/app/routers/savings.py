@@ -4,15 +4,20 @@ Savings are only claimed when they can be defended:
 
     saved = (reference_price - price_paid) * liters
 
-``reference_price`` is the average price of the same fuel across ALL tracked
-stations within +/-1 hour of the refuel, taken from our own observations.
-If we have too few observations around that moment, no reference exists and
-the session is shown but NOT counted towards savings. Savings can be negative
-(you paid more than the area average) and are reported as such.
+The reference is chosen per refuel:
+
+* ``area``   average of the same fuel across ALL tracked stations within
+             +/-1 hour of the refuel (our own observations);
+* ``nl``     the Dutch national average (CBS open data, Euro95 for E5/E10);
+* ``manual`` a price the user enters.
+
+If no reference exists for a session (too few observations, Dutch figure not
+published yet) it is shown but NOT counted. Savings can be negative.
 """
 
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Literal, Optional
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
@@ -21,7 +26,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from limiter import limiter
-from models import FuelPrice, RefuelLog, Station, User
+from models import FuelPrice, NlFuelPrice, RefuelLog, Station, User
 from routers.auth import require_current_user
 
 router = APIRouter()
@@ -30,7 +35,14 @@ FUEL_COLUMNS = {"e5": FuelPrice.e5, "e10": FuelPrice.e10, "diesel": FuelPrice.di
 REFERENCE_WINDOW = timedelta(hours=1)
 MIN_REFERENCE_ROWS = 20
 MAX_LOGS_RETURNED = 200
-MAX_LOGS_PER_USER = 5000
+MAX_LOGS_PER_USER = 1000
+NL_MAX_AGE_DAYS = 10  # use the latest published Dutch figure at most this many days old
+TZ = ZoneInfo("Europe/Berlin")
+REFERENCE_LABELS = {
+    "area": "Area average (tracked stations)",
+    "nl": "Dutch average (CBS)",
+    "manual": "Your reference price",
+}
 
 
 class RefuelCreate(BaseModel):
@@ -39,6 +51,8 @@ class RefuelCreate(BaseModel):
     price_per_liter: float = Field(ge=0.5, le=5.0)
     fueled_at: Optional[datetime] = None  # defaults to now
     station_id: Optional[str] = Field(default=None, max_length=64)
+    reference_source: Literal["area", "nl", "manual"] = "area"
+    manual_reference_price: Optional[float] = Field(default=None, ge=0.5, le=5.0)
 
 
 def _reference_price(db: Session, fuel_type: str, at: datetime) -> Optional[float]:
@@ -57,8 +71,34 @@ def _reference_price(db: Session, fuel_type: str, at: datetime) -> Optional[floa
     return float(avg)
 
 
+def _nl_price(db: Session, fuel_type: str, at: datetime) -> Optional[float]:
+    """Dutch average on the refuel day (or the latest published day before it)."""
+    day = at.astimezone(TZ).date()
+    row = (
+        db.query(NlFuelPrice)
+        .filter(
+            NlFuelPrice.day <= day,
+            NlFuelPrice.day >= day - timedelta(days=NL_MAX_AGE_DAYS),
+        )
+        .order_by(NlFuelPrice.day.desc())
+        .first()
+    )
+    if row is None:
+        return None
+    value = row.diesel if fuel_type == "diesel" else row.euro95
+    return float(value) if value is not None else None
+
+
+def _resolve_reference(log: RefuelLog, db: Session) -> Optional[float]:
+    if log.reference_source == "nl":
+        return _nl_price(db, log.fuel_type, log.fueled_at)
+    if log.reference_source == "manual":
+        return log.manual_reference_price
+    return _reference_price(db, log.fuel_type, log.fueled_at)
+
+
 def _serialize(log: RefuelLog, db: Session) -> dict:
-    ref = _reference_price(db, log.fuel_type, log.fueled_at)
+    ref = _resolve_reference(log, db)
     saved = (ref - log.price_per_liter) * log.liters if ref is not None else None
     return {
         "id": log.id,
@@ -69,6 +109,10 @@ def _serialize(log: RefuelLog, db: Session) -> dict:
         "fueled_at": log.fueled_at,
         "station_id": log.station_id,
         "station_name": log.station.name if log.station else None,
+        "reference_source": log.reference_source,
+        "reference_label": REFERENCE_LABELS.get(
+            log.reference_source, log.reference_source
+        ),
         "reference_price": round(ref, 3) if ref is not None else None,
         "saved": round(saved, 2) if saved is not None else None,
     }
@@ -101,11 +145,28 @@ def get_savings(
             "sessions_without_reference": len(items) - len(counted),
         },
         "method": (
-            "Saved = (average price of the same fuel at all tracked stations within "
-            "±1 hour of your refuel − your price) × litres. Sessions without enough "
-            "price data around that time are not counted."
+            "Saved = (reference price − your price) × litres. The reference is the one "
+            "you picked for each refuel: the area average of tracked stations (±1 hour), "
+            "the Dutch national average (CBS), or your own price. Sessions without a "
+            "reference are not counted."
         ),
         "sessions": items[:limit],
+    }
+
+
+@router.get("/nl-average")
+def get_nl_average(db: Session = Depends(get_db)):
+    """Latest published Dutch national average pump prices (CBS)."""
+    row = db.query(NlFuelPrice).order_by(NlFuelPrice.day.desc()).first()
+    if row is None:
+        return {"available": False}
+    return {
+        "available": True,
+        "day": row.day.isoformat(),
+        "euro95": row.euro95,
+        "diesel": row.diesel,
+        "source": "CBS Statistics Netherlands, table 80416ENG",
+        "note": "Euro95 is the Dutch equivalent of E10; it is used for both E5 and E10.",
     }
 
 
@@ -137,6 +198,9 @@ def add_refuel(
     ):
         raise HTTPException(status_code=400, detail="Unknown station")
 
+    if body.reference_source == "manual" and body.manual_reference_price is None:
+        raise HTTPException(status_code=400, detail="Enter your reference price")
+
     count = (
         db.query(func.count(RefuelLog.id)).filter(RefuelLog.user_id == user.id).scalar()
     )
@@ -150,6 +214,12 @@ def add_refuel(
         liters=round(body.liters, 2),
         price_per_liter=round(body.price_per_liter, 3),
         fueled_at=fueled_at,
+        reference_source=body.reference_source,
+        manual_reference_price=(
+            round(body.manual_reference_price, 3)
+            if body.reference_source == "manual"
+            else None
+        ),
     )
     db.add(log)
     db.commit()

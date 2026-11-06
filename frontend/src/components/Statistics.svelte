@@ -14,6 +14,16 @@
   let topStations = null
   let lowestEver = null
   let loading = true
+  // Optional: relate 'cheapest X% of the time' to the hours a station was open (had data).
+  let weighted = readPref() === '1'
+
+  function readPref() {
+    try { return localStorage.getItem('fuel_lb_weighted') } catch { return null }
+  }
+  function toggleWeighted() {
+    try { localStorage.setItem('fuel_lb_weighted', weighted ? '1' : '0') } catch { /* ignore */ }
+    fetchStats()
+  }
   
   async function fetchStats() {
     try {
@@ -36,7 +46,7 @@
       }
       
       // Fetch top stations (always, for leaderboard)
-      topStations = await safeFetch(`${API_BASE}/prices/analytics/top-stations?fuel_type=${encodeURIComponent(fuelType)}&hours=${hours}&limit=${leaderboardOnly ? 10 : 3}`)
+      topStations = await safeFetch(`${API_BASE}/prices/analytics/top-stations?fuel_type=${encodeURIComponent(fuelType)}&hours=${hours}&limit=${leaderboardOnly ? 10 : 3}${weighted ? '&opening_hours_weighted=true' : ''}`)
       
       loading = false
     } catch (error) {
@@ -55,22 +65,26 @@
     fetchStats()
   }
   
-  function getVolatilityLabel(volatility) {
-    if (volatility < 0.01) return 'Very Stable'
-    if (volatility < 0.02) return 'Stable'
-    if (volatility < 0.03) return 'Moderate'
-    if (volatility < 0.05) return 'Volatile'
-    return 'Very Volatile'
+  // Stability compares a station's typical daily price swing with the other
+  // stations (computed by the backend), so the label is no longer "very volatile"
+  // for everyone because of the shared midday price jump.
+  const STABILITY = {
+    very_stable: { label: 'Very stable', color: '#10b981' },
+    stable: { label: 'Stable', color: '#22c55e' },
+    typical: { label: 'Typical', color: '#6b7280' },
+    volatile: { label: 'Volatile', color: '#f59e0b' },
+    very_volatile: { label: 'Very volatile', color: '#f97316' },
   }
-  
-  function getVolatilityColor(volatility) {
-    if (volatility < 0.01) return '#10b981'
-    if (volatility < 0.02) return '#22c55e'
-    if (volatility < 0.03) return '#f59e0b'
-    if (volatility < 0.05) return '#f97316'
-    return '#ef4444'
+
+  function stabilityInfo(station) {
+    return STABILITY[station.stability] || { label: 'Not enough data', color: '#6e7681' }
   }
-  
+
+  // Bar length: 50% = same swing as the typical station, capped at 100%.
+  function swingBar(station) {
+    return station.swing_vs_market ? Math.min(station.swing_vs_market * 50, 100) : 0
+  }
+
   // Create formatter once to avoid recreating on every formatDate call
   const dateFormatter = new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Europe/Berlin',
@@ -181,15 +195,25 @@
     
     {#if leaderboardOnly && topStations && topStations.length > 0}
       <div class="top-stations">
-        <h3>🏆 Top 10 Stations</h3>
+        <div class="lb-head">
+          <h3>🏆 Top 10 Stations</h3>
+          <label class="lb-toggle" title="Count 'cheapest X% of the time' only over the hours a station was open (had prices)">
+            <input type="checkbox" bind:checked={weighted} on:change={toggleWeighted} />
+            by opening hours
+          </label>
+        </div>
         <div class="stations-list">
           {#each topStations as station, index}
             <div class="station-card">
-              <div class="station-rank">#{index + 1}</div>
+              <div class="station-rank">{station.rank ? '#' + station.rank : '–'}</div>
               <div class="station-info">
                 <div class="station-name">{station.name}</div>
                 <div class="station-city">{station.city || station.brand}</div>
+                <div class="data-note">{station.hours_with_data} h · {station.days_with_data} d of data{#if station.enough_data && station.stability_days}{' · stability from ' + station.stability_days + ' d'}{/if}</div>
               </div>
+              {#if !station.enough_data}
+                <div class="no-data-note">Not enough data to rank (only {station.hours_with_data} of {station.window_hours} h). Avg €{station.avg_price}</div>
+              {:else}
               <div class="station-stats">
                 <div class="station-stat">
                   <span class="label">Avg Price:</span>
@@ -205,14 +229,19 @@
                 </div>
                 <div class="station-stat volatility">
                   <span class="label">Stability:</span>
-                  <span class="value" style="color: {getVolatilityColor(station.volatility)}">
-                    {getVolatilityLabel(station.volatility)}
+                  <span
+                    class="value"
+                    style="color: {stabilityInfo(station).color}"
+                    title="Average daily price swing over 30 days compared with the typical station"
+                  >
+                    {stabilityInfo(station).label}{#if station.daily_swing_cents !== null}{' · ' + station.daily_swing_cents + '¢ daily swing'}{/if}
                   </span>
                 </div>
               </div>
               <div class="volatility-bar">
-                <div class="volatility-fill" style="width: {Math.min(station.volatility * 1000, 100)}%; background-color: {getVolatilityColor(station.volatility)}"></div>
+                <div class="volatility-fill" style="width: {swingBar(station)}%; background-color: {stabilityInfo(station).color}"></div>
               </div>
+              {/if}
             </div>
           {/each}
         </div>
@@ -469,6 +498,48 @@
     font-weight: 600;
   }
   
+  .station-stat.volatility .value {
+    margin-left: 0.4rem;
+  }
+
+  .lb-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.5rem;
+  }
+
+  .lb-head h3 {
+    margin: 0;
+  }
+
+  .lb-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.75rem;
+    color: #8b949e;
+    cursor: pointer;
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 500;
+  }
+
+  .data-note {
+    color: #6e7681;
+    font-size: 0.7rem;
+    margin-top: 0.125rem;
+  }
+
+  .no-data-note {
+    grid-column: 1 / -1;
+    color: #8b949e;
+    font-size: 0.8rem;
+    font-style: italic;
+  }
+
   .volatility-bar {
     grid-column: 1 / -1;
     height: 3px;

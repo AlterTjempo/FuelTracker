@@ -28,6 +28,13 @@
     return Math.floor(diffMs / (1000 * 60 * 60))
   }
   
+  const fuelOptions = [
+    { value: 'e5', label: 'E5' },
+    { value: 'e10', label: 'E10' },
+    { value: 'diesel', label: 'Diesel' },
+    { value: 'oil', label: 'Oil' },
+  ]
+
   const timeRanges = [
     { label: '24h', hours: 24 },
     { label: '3d', hours: 72 },
@@ -79,44 +86,36 @@
   <div class="container">
     <div class="controls">
       <div class="fuel-selector">
-        <label>Fuel Type:</label>
-        <button 
-          class:active={selectedFuelType === 'e5'} 
-          on:click={() => selectedFuelType = 'e5'}
-        >
-          E5
-        </button>
-        <button 
-          class:active={selectedFuelType === 'e10'} 
-          on:click={() => selectedFuelType = 'e10'}
-        >
-          E10
-        </button>
-        <button 
-          class:active={selectedFuelType === 'diesel'} 
-          on:click={() => selectedFuelType = 'diesel'}
-        >
-          Diesel
-        </button>
-        <button 
-          class:active={selectedFuelType === 'oil'} 
-          on:click={() => selectedFuelType = 'oil'}
-        >
-          Oil
-        </button>
+        <label for="fuel-seg">Fuel</label>
+        <div class="seg" id="fuel-seg" role="group" aria-label="Fuel type">
+          {#each fuelOptions as opt}
+            <button
+              class:active={selectedFuelType === opt.value}
+              aria-pressed={selectedFuelType === opt.value}
+              on:click={() => selectedFuelType = opt.value}
+            >
+              {opt.label}
+            </button>
+          {/each}
+        </div>
       </div>
 
-      <div class="time-selector">
-        <label>Time Range:</label>
-        {#each timeRanges as range}
-          <button 
-            class:active={selectedHours === range.hours} 
-            on:click={() => selectedHours = range.hours}
-          >
-            {range.label}
-          </button>
-        {/each}
-      </div>
+      {#if activeTab === 'overview' || activeTab === 'statistics'}
+        <div class="time-selector">
+          <label for="period-seg">Period</label>
+          <div class="seg" id="period-seg" role="group" aria-label="Time range">
+            {#each timeRanges as range}
+              <button
+                class:active={selectedHours === range.hours}
+                aria-pressed={selectedHours === range.hours}
+                on:click={() => selectedHours = range.hours}
+              >
+                {range.label}
+              </button>
+            {/each}
+          </div>
+        </div>
+      {/if}
     </div>
 
     <div class="tabs" role="tablist">
@@ -128,9 +127,6 @@
       </button>
       <button role="tab" aria-selected={activeTab === 'outlook'} class:active={activeTab === 'outlook'} on:click={() => activeTab = 'outlook'}>
         <span class="tab-icon">🔮</span><span>Outlook</span>
-      </button>
-      <button role="tab" aria-selected={activeTab === 'leaderboard'} class:active={activeTab === 'leaderboard'} on:click={() => activeTab = 'leaderboard'}>
-        <span class="tab-icon">🏆</span><span>Literboard</span>
       </button>
       <button role="tab" aria-selected={activeTab === 'stations'} class:active={activeTab === 'stations'} on:click={() => activeTab = 'stations'}>
         <span class="tab-icon">⛽</span><span>Stations</span>
@@ -184,6 +180,10 @@
         <div class="card">
           <PriceHeatmap fuelType={selectedFuelType} />
         </div>
+        <div class="card">
+          <h2>🏆 Literboard · Top Stations</h2>
+          <Statistics fuelType={selectedFuelType} hours={selectedHours} leaderboardOnly={true} />
+        </div>
       {/if}
     {:else if activeTab === 'outlook'}
       {#if selectedFuelType === 'oil'}
@@ -191,25 +191,12 @@
           <div class="oil-notice">🔮 The weekly outlook is based on pump prices. <br> Switch to E5, E10, or Diesel to see it. Oil context is shown inside the outlook.</div>
         </div>
       {:else}
-        <div class="card">
-          <Outlook fuelType={selectedFuelType} />
-        </div>
+        <Outlook fuelType={selectedFuelType} />
       {/if}
     {:else if activeTab === 'savings' && $currentUser}
       <div class="card">
         <Savings selectedFuelType={selectedFuelType} />
       </div>
-    {:else if activeTab === 'leaderboard'}
-      {#if selectedFuelType === 'oil'}
-        <div class="card">
-          <div class="oil-notice">🏆 The Literboard is not available for crude oil <br> Switch to E5, E10, or Diesel to see station statistics.</div>
-        </div>
-      {:else}
-        <div class="card">
-          <h2>🏆 Top Stations Leaderboard</h2>
-          <Statistics fuelType={selectedFuelType} hours={selectedHours} leaderboardOnly={true} />
-        </div>
-      {/if}
     {:else if activeTab === 'stations'}
       {#if selectedFuelType === 'oil'}
         <div class="card">
@@ -277,20 +264,49 @@
 
   .controls {
     display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-    margin-bottom: 1rem;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 1.25rem;
+    margin-bottom: 0.75rem;
   }
 
+  /* Segmented controls: grouped, quiet, with a clearly tinted selected state */
   .fuel-selector, .time-selector {
     display: flex;
-    gap: 0.25rem;
+    gap: 0.5rem;
     align-items: center;
-    flex-wrap: wrap;
   }
 
   .fuel-selector button, .time-selector button {
-    padding: 0.5rem 0.55rem;
+    padding: 0.3rem 0.65rem;
+    min-height: 2rem;
+    font-size: 0.8rem;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: #8b949e;
+  }
+
+  .fuel-selector button:hover, .time-selector button:hover {
+    background: #21262d;
+    border-color: transparent;
+    color: #c9d1d9;
+  }
+
+  .fuel-selector button.active, .time-selector button.active {
+    background: rgba(59, 130, 246, 0.16);
+    border-color: #3b82f6;
+    color: #79b8ff;
+  }
+
+  .seg {
+    display: inline-flex;
+    gap: 2px;
+    padding: 3px;
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 8px;
   }
 
   .tabs {
@@ -360,9 +376,11 @@
 
   label {
     font-weight: 600;
-    color: #8b949e;
+    color: #6e7681;
     margin-right: 0.25rem;
-    font-size: 0.85rem;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
     white-space: nowrap;
   }
 
@@ -455,9 +473,8 @@
     }
 
     .controls {
-      flex-direction: row;
-      gap: 1.5rem;
-      margin-bottom: 1.5rem;
+      gap: 0.5rem 1.5rem;
+      margin-bottom: 1rem;
     }
 
     .fuel-selector, .time-selector {
@@ -465,7 +482,7 @@
     }
 
     .fuel-selector button, .time-selector button {
-      padding: 0.5rem 1rem;
+      padding: 0.3rem 0.85rem;
     }
 
     .tabs button {
@@ -481,7 +498,6 @@
     }
 
     label {
-      font-size: 0.9rem;
       margin-right: 0.5rem;
     }
 
@@ -525,8 +541,8 @@
     }
 
     .controls {
-      gap: 2rem;
-      margin-bottom: 2rem;
+      gap: 0.5rem 2rem;
+      margin-bottom: 1.25rem;
     }
 
     .tabs button {
