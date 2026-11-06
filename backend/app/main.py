@@ -70,7 +70,7 @@ async def lifespan(app: FastAPI):
         "interval",
         minutes=20,
         id="warm_trend_cache",
-        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=90),
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=20),
     )
 
     # Start scheduler
@@ -92,7 +92,15 @@ async def lifespan(app: FastAPI):
             except Exception as exc:
                 print(f"Initial fetch failed: {type(exc).__name__}")
 
-    initial_task = asyncio.create_task(initial_fetch())
+    async def initial_warmup():
+        await initial_fetch()
+        # compute the slow trend results once data is in, so the first visitor never waits
+        try:
+            await asyncio.to_thread(insights.warm_trend_cache)
+        except Exception as exc:
+            print(f"Initial trend warm-up failed: {type(exc).__name__}")
+
+    initial_task = asyncio.create_task(initial_warmup())
 
     yield
 

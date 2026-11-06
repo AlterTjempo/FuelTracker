@@ -551,6 +551,10 @@ Roadmap towards a richer model (in order of expected value):
 4. Store a price only when it changes plus a `last_confirmed_at`, so intraday timing is exact.
 5. Only then consider gradient boosting / a small neural net, and only if it beats the ridge model in the same backtest.
 
+> **Update (Nov 2026):** the trend model, Go Now, best-time and Literboard were extended and backtested.
+> The current behaviour, thresholds and evidence are described in [prediction-models.md](prediction-models.md);
+> the section below is the original 8b summary.
+
 ## 8c. Savings references, Literboard stability (Nov 2026)
 
 - Savings can be compared against the tracked-station area average (default), the Dutch national average (CBS open data table 80416ENG, fetched by `services/nl_collector.py` into `nl_fuel_prices`, Euro95 used for E5/E10) or a manual reference price.

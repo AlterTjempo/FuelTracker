@@ -1,227 +1,245 @@
 # How FuelTracker's Models Work
 
-This document explains the three analytical features of FuelTracker: the **Outlook** page, the **Go Now indicator** and the **Literboard**. It describes what the code does today, so every number and threshold here can be found in the source (file references are given in each section).
+This document explains the analytical features of FuelTracker: the **Outlook** page, the **Go Now indicator** and the **Literboard**. It describes what the code does today, so every number and threshold can be found in the source. All tunable values live in one module, [`backend/app/analytics_config.py`](../backend/app/analytics_config.py), and each says whether it is a default or came from a backtest.
 
-All three are deliberately simple, transparent statistics that run on a small home server. None of them is a black box, and none of them claims more than the data supports.
+All of it is deliberately simple, transparent statistics that runs on a small home server. Nothing is a black box, and nothing claims more than the data supports.
+
+Generated evidence (re-run the scripts to refresh it):
+
+| Report | Script | Content |
+|---|---|---|
+| [go-now-backtest.md](go-now-backtest.md) | `python -m app.services.go_now_backtest` | realised savings per Go Now label, tuning |
+| [trend-backtest.md](trend-backtest.md) | `python -m app.services.trend_backtest` | every trend variant, probability model, hourly forecast |
+| (printed) | `python -m app.services.literboard_check` | which stability window is most repeatable |
+
+Inside the backend container use `python -m services.<name>` (the app directory is the working directory there).
 
 ## Contents
 
 1. [Shared concepts](#1-shared-concepts)
 2. [Outlook](#2-outlook)
-   - [2.1 Price trend model](#21-price-trend-model-next-17-days)
-   - [2.2 Best time to refuel (weekday and hour pattern)](#22-best-time-to-refuel-weekday--hour-pattern)
-   - [2.3 Market context (Brent oil and news)](#23-market-context-brent-oil-and-news)
 3. [Go Now indicator](#3-go-now-indicator)
 4. [Literboard](#4-literboard)
-5. [Known limitations](#5-known-limitations)
+5. [Configuration, tables and migrations](#5-configuration-tables-and-migrations)
+6. [Known limitations](#6-known-limitations)
+7. [Where to improve next](#7-where-to-improve-next)
 
 ---
 
 ## 1. Shared concepts
 
-**Data.** A collector fetches every station in the configured radius from Tankerkönig every 15 minutes and stores one row per station per fuel type in `fuel_prices`. Brent crude (via Yahoo Finance, converted to EUR) and energy news (RSS) are collected hourly.
+**Data.** A collector fetches every station in the configured radius from Tankerkönig every 15 minutes ([`data_collector.py`](../backend/app/services/data_collector.py)). Hourly collectors fetch Brent in EUR ([`oil_collector.py`](../backend/app/services/oil_collector.py)), energy news ([`news_collector.py`](../backend/app/services/news_collector.py)) and the market series described in [2.1](#21-inputs): gasoil proxy, RBOB, EUR/USD, Brent in USD ([`market_collector.py`](../backend/app/services/market_collector.py)).
 
-**Time zone.** Everything that depends on the clock (hour of day, weekday, "today") is computed in **Europe/Berlin** time, not UTC.
+**Time zone.** Everything that depends on the clock (hour of day, weekday, "today") is Europe/Berlin time.
 
-**The noon price jump.** In this data prices fall through the morning to a low around 11:00 and then jump by roughly 10 to 14 cents at 12:00. This is the single strongest pattern in the data (far stronger than any weekday effect), and several design decisions below exist to handle it correctly.
+**The noon price jump.** Prices fall through the morning to a low around 11:00 and then jump by roughly 10 to 15 cents at 12:00. This is by far the strongest pattern in the data, and several design decisions exist to handle it correctly.
 
-**Missing data is never filled in.** If a period has no observations it stays empty: charts show gaps, and models skip days that do not have enough coverage. The development database is not continuous, so most features check how much data they have and say so when it is not enough.
+**Missing data is never filled in.** A gap stays a gap: charts show gaps, days without enough coverage are skipped, outcomes in the backtests are only computed when the future window really exists.
 
-**Backtesting, not trust.** Where a model makes a forecast (the Outlook trend model), it must prove itself on past data it has not seen before it is shown, and it is compared against the simplest possible alternative.
+**No look-ahead, honest validation.** Every model that forecasts is trained walk-forward (a sample is only used once its target has happened). The first half of the backtest *selects* a model and calibrates its band; everything reported is measured on the second half. Every forecast must beat a naive baseline before it is shown. Statistics helpers (bootstrap, Theil-Sen, Diebold-Mariano, pinball loss, Brier score, reliability table) are in [`stats_utils.py`](../backend/app/services/stats_utils.py).
+
+**Calendar features were deliberately left out** (public holidays, school holidays, bridge days, month-end, tax or CO2 changes). They would add inputs and UI clutter, and the data do not show a weekday effect worth modelling (see 2.2).
 
 ---
 
 ## 2. Outlook
 
-Code: [`backend/app/routers/insights.py`](../backend/app/routers/insights.py), [`backend/app/services/forecast_model.py`](../backend/app/services/forecast_model.py), UI in [`frontend/src/components/Outlook.svelte`](../frontend/src/components/Outlook.svelte) and `TrendChart.svelte`.
+Code: [`routers/insights.py`](../backend/app/routers/insights.py), [`services/forecast_model.py`](../backend/app/services/forecast_model.py), [`services/brand_pattern.py`](../backend/app/services/brand_pattern.py); UI in `Outlook.svelte` and `TrendChart.svelte`.
 
-The Outlook page combines three separate things that answer different questions:
-
-| Section | Question it answers | Endpoint |
+| Section | Question | Endpoint |
 |---|---|---|
-| Price trend model | Will the average price be higher or lower in the next days? | `GET /api/insights/trend` |
-| Best time to refuel | Which hour and weekday are usually cheapest? | `GET /api/insights/forecast` |
-| Market context | What are Brent oil and the news doing? | `GET /api/insights/market` |
+| Price trend | Will the average price be higher or lower in the next days? | `GET /api/insights/trend` |
+| Best time to refuel | Which hour is cheapest? | `GET /api/insights/forecast` |
+| Market context | What are Brent and the news doing? | `GET /api/insights/market` |
 
-Results are cached in memory for 5 minutes (30 minutes for the trend model).
+Caches: forecast and market 5 minutes, trend 30 minutes (re-computed by a scheduled job every 20 minutes, because one computation takes about 10 seconds), brand patterns 1 hour.
 
-### 2.1 Price trend model (next 1 to 7 days)
+### 2.1 Price trend model
 
-**What it predicts.** The *change* of the daily area-average price, compared with the latest complete day, for 1, 2, 3, 5 and 7 days ahead.
+**The daily price level.** One number per day: the average over all stations and hours, using only hours with reasonable coverage (at least 40% of the typical rows per hour) on days with at least 18 of 24 hours. A plain average would swing by about a cent depending on which hours happen to be missing (because of the noon jump), so each hourly price is first corrected by the typical hour-of-day shape learned from nearly complete days (22+ hours) (`_daily_levels`).
 
-```
-y = price[t + h] - price[t]        (in cents per litre)
-```
+**Three targets** (all from the same features):
 
-**The daily price level.** One number per day: the average over all stations and all hours of that day, with two safeguards:
+| Target | Model | Where it shows |
+|---|---|---|
+| Change of the daily level, 1, 2, 3, 5, 7 days ahead, in cents (`price[t+h] − price[t]`) | ridge or median quantile regression, whichever wins the backtest, otherwise the baseline | trend card and chart |
+| Probability that the level rises by more than **1 cent** (`PROB_RISE_CENTS`) within 24 h and 48 h | L2-regularised logistic regression | one line in the trend card, **only if validated** |
+| Hourly price shape of the next day | latest day level + recency-weighted hour-of-day shape | API only (`hourly`) |
 
-1. Only hours with reasonable coverage count (at least 40% of the typical number of rows per hour).
-2. A day is only used if at least **18 of 24 hours** are covered.
-3. Because of the noon jump, a plain average would swing by about a cent depending on *which* hours happen to be missing. So each hourly price is first corrected by the typical hour-of-day shape (learned from nearly complete days with 22+ hours) before averaging.
+#### Inputs
 
-**Features** (all known at the end of day *t*, no look-ahead):
+All are known at the end of day *t*; variants that need an input only run where the data exist (nothing imputed).
 
 | Feature | Meaning |
 |---|---|
-| `weekday` | The weekday of the target day (6 dummy variables) |
-| `mom_short` | Today's price vs. the average of the previous 3 days (momentum) |
-| `mom_week` | Average of the last 3 days vs. 7 to 9 days ago (weekly drift) |
-| `reversion` | Today vs. the 28-day average (mean reversion; needs 10+ days) |
-| `oil_mom` | Brent in EUR/L: last 3 days vs. 7 to 9 days ago |
-| `oil_rel` | Brent: last 3 days vs. its 28-day average |
-| `news_3d` | Keyword-scored supply-risk news over the last 3 days (log-scaled) |
+| weekday | weekday of the target day (6 dummies) |
+| `mom_short`, `mom_week`, `reversion` | momentum (today vs. previous 3 days), weekly drift (last 3 days vs. 7 to 9 days ago), distance from the 28-day average |
+| `oil_mom`, `oil_rel` | Brent in EUR/L: trend and distance from its 28-day average |
+| `news_3d` | keyword-scored supply-risk news over the last 3 days |
+| `<series>_L<lag>` | **new:** lagged *changes* (not levels) of gasoil, RBOB, EUR/USD and Brent in USD. Lags 1, 2, 3, 5, 10 days (`MARKET_LAGS`). Each is the change of the 3-day mean ending *lag* days ago vs. the 3-day mean before it. 3-day windows always contain a trading day, so weekends do not create false gaps. |
 
-**Candidate models.** Ridge regression (a linear model with a penalty that stops it from overfitting small datasets), standardised inputs, penalty λ = 3. Five variants are tried for each horizon:
+**Market sources.** ICE gasoil and Eurobob/ARA are not available for free on Yahoo Finance (checked: `G=F`, `LGO=F`, `EBOB.L`, `ICE.L` all return "not found"). The closest free benchmarks are used and stored in `market_prices`: `HO=F` (NY Harbor ULSD, the standard diesel/gasoil benchmark, used as **gasoil proxy**), `RB=F` (RBOB gasoline, the closest free proxy for Eurobob), `EURUSD=X` and `BZ=F` (Brent in USD, because it has a long history). A one-time backfill of two years of daily closes (stored at noon UTC of the trading date) lets the features be validated on more than a few weeks; afterwards the hourly collector adds real timestamps.
 
-| Variant | Inputs |
-|---|---|
-| `weekday` | weekday only |
-| `momentum` | momentum, weekly drift, mean reversion |
-| `price` | the above plus weekday |
-| `momentum_oil` | momentum features plus Brent |
-| `momentum_oil_news` | momentum features plus Brent plus news |
+#### Candidate models
 
-Variants that need Brent or news are only usable on days where those inputs exist. Nothing is imputed.
+| Variant | Inputs | Learner |
+|---|---|---|
+| `weekday` | weekday | ridge |
+| `momentum` | momentum, drift, reversion | ridge |
+| `price` | the above + weekday | ridge |
+| `momentum_oil`, `momentum_oil_news` | + Brent, + news | ridge |
+| `momentum_market` | momentum + all market lags (20 features, penalty 20 instead of 3) | ridge |
+| `qr_momentum`, `qr_market` | as above | **median quantile regression** (smoothed IRLS, L2 penalty), more robust to outliers |
 
-**Validation (the important part).** Each variant is tested with an *expanding-window walk-forward backtest*:
+The ridge model stays the default; a quantile variant only runs if it wins the same backtest.
 
-1. For every past day, train only on samples whose target day had already happened by then (no peeking).
-2. Predict that day's outcome and record the error.
-3. Compare with the **baseline: "the price stays the same"** (predicted change = 0).
+#### Evaluation (every variant, every horizon)
 
-To avoid fooling ourselves, the backtest folds are split in half **in time**:
+Reported by [`trend_backtest.py`](../backend/app/services/trend_backtest.py), second half only:
 
-- the **first half** is used to *choose* the best variant (it must beat the baseline by at least 3%);
-- the **second half** is used to *report* how good it is. That half played no part in the choice.
+- **MAE vs. the "no change" baseline** and the resulting *skill* (1 − MAE/MAE_baseline);
+- **directional accuracy** (vs. the share of the majority direction);
+- **pinball loss** of the 10% and 90% quantiles (vs. the baseline's);
+- **Diebold-Mariano test** against the baseline (one-sided, Newey-West variance with *h−1* lags, Harvey small-sample correction);
+- **coverage of the 80% band**.
 
-A variant needs at least 24 backtest folds and 25 training samples to be considered at all (the model is refitted every 4 folds to keep this fast).
+**Selection rule:** a variant must beat the baseline by at least 3% MAE (`TREND_MIN_SKILL`) **and** have a Diebold-Mariano p-value below 0.1 (`TREND_MAX_DM_P`) on the selection half. The best of those by selection-half skill is used, and only if it also beats the baseline on the evaluation half.
 
-**Outcome.**
+**The 80% band** is the 10% and 90% quantile of the model's own errors on the selection half (not ±1.28σ, which assumes normal errors). Its coverage is then measured on the evaluation half, shown as `coverage80` and flagged when it is more than 8 points from 80%. On the dev data the old ±1.28σ band covered 85% to 97% at 1 to 3 days (too wide) and 70% to 78% at 7 days (too narrow). The empirical band lands between 71% and 87% for most variants and horizons; the report marks values outside 72% to 88% with a warning (E5 at 7 days is only 61%, so its band is too narrow).
 
-- If a variant wins and is also better than the baseline on the reporting half, it is used. The page shows the expected price, the expected change and an 80% range (±1.28 × the model's out-of-sample error).
-- Otherwise the **baseline is shown**: expected change 0, the verdict "No significant change expected", and the 80% range is the baseline's typical error. The band then describes normal noise, not a predicted move.
+**Fallback.** If no variant qualifies, the baseline is returned (expected change 0, verdict "No significant change expected"). The band is then the baseline's typical error, not a predicted move.
 
-**Reliability badge on the page.**
+**Reliability badge** (per horizon, from out-of-sample metrics, `reliability_level`):
 
 | Badge | When |
 |---|---|
-| High | the model beats the baseline by 20% or more (out-of-sample) |
-| Medium | 8% to 20% |
-| Low | under 8%, or no model beats the baseline |
+| High | beats baseline, skill ≥ 15%, Diebold-Mariano p < 0.05 **and** the 80% band is calibrated |
+| Medium | skill ≥ 5% and Diebold-Mariano p < 0.15 |
+| Low | otherwise, or no model beats the baseline |
 
-**Direction label.** *Rising* or *falling* only if the expected change is at least 0.3 cents and at least half the model's typical error; otherwise *flat*.
+**Probability of a rise.** Same features, same walk-forward discipline (`probability_forecast`). Candidates `momentum` and `momentum_market`. Compared with the **base rate** (the share of rises in the training data):
 
-**Refusals.** The model returns "not enough data" if the latest complete day is more than 3 days old, or fewer than about 35 usable days exist.
+- **Brier score** and Brier skill vs. the base rate, Diebold-Mariano on the squared errors;
+- **reliability table** (predicted vs. observed frequency in 5 bins) and the **expected calibration error** (ECE).
 
-**What the model found on the development data.** With about 200 usable days, no variant beat the baseline: day-to-day moves are about ±1.2 cents of noise, and the weekday effect is below 0.5 cents. The page therefore says "no clear change". The model switches itself on when a real signal exists. This machinery is covered by tests in `backend/tests/test_forecast_model.py`: an oil-led synthetic series is detected, a pure random walk does not produce a fake model, and features never use future data.
+A variant is selected if Brier skill ≥ 3% and Diebold-Mariano p < 0.1 on the selection half; it is *validated* (and shown) if Brier skill ≥ 3% on the evaluation half and ECE ≤ 0.12. Reliability: High needs Brier skill ≥ 15% and ECE ≤ 0.07, otherwise Medium. If it is not validated, **nothing is shown**.
 
-### 2.2 Best time to refuel (weekday and hour pattern)
+**Hourly forecast.** Day level (latest day with the shape removed) plus a recency-weighted hour-of-day shape (28 days, half-life 14 days); the variant `weekend_split` uses separate shapes for weekends. Baselines: *same hour yesterday* and *same hour, same weekday last week*. Validated only if the MAE is below both and the Diebold-Mariano p-value against the better baseline is below 0.1.
 
-**What it shows.** The cheapest and priciest hour, how big the difference is, and how each of the next 7 days compares with the weekly average.
+**Refusals.** "Not enough data" if the latest complete day is more than 3 days old or fewer than 35 usable days exist.
 
-**Method.**
+**What the dev data show** (details in [trend-backtest.md](trend-backtest.md)): with about 200 usable days no variant beats the baseline for E5 or diesel, the probability model is not validated and the hourly model is close to but not significantly better than "same hour yesterday" (E5: 1.57 vs. 1.63 cents, p = 0.15). The page therefore says "no clear change". The machinery is covered by tests on synthetic data (a learnable momentum signal is found and calibrated, an oil-led series is found, a random walk gives no fake model, features never look ahead).
 
-1. Average price per Berlin-local hour across all stations, using up to **365 days** of history.
-2. Same day-level correction as above (days need 18+ covered hours).
-3. **Weekday effect** = a day's level minus the average of the surrounding 7 days (centred window, at least 5 days present). Subtracting the local weekly baseline removes slow price-level moves (for example oil-driven ones), so only the weekday pattern remains.
-4. **Hour effect** = an hour's price minus that day's average, per weekday.
-5. Both are averaged with **recency weighting**: a day's weight halves every 120 days, so the last weeks count most. The standard error uses the effective sample size.
+### 2.2 Best time to refuel
 
-**Labels.** A weekday is called *cheaper* or *pricier* than usual only if its offset is larger than max(0.3 cents, its standard error); otherwise *about average*. Every weekday needs at least 3 samples (roughly 3 weeks of data) before anything is shown.
+Endpoint `GET /api/insights/forecast`; backend `_compute_forecast`.
 
-**For today** the page picks the cheapest hour *remaining* from now, since earlier hours are gone.
+**The hour pattern is the headline.** For every Berlin hour, the recency-weighted (half-life 120 days, up to a year of history) average deviation of that hour from its day's mean, pooled over all weekdays (`hour_pattern`: cheapest hour, priciest hour, spread, profile). For *today*, the cheapest hour **from now on** is picked from the same profile.
 
-**Pattern confidence** is *low* below 5 samples per weekday, *medium* below 9, otherwise *high*.
+**Weekdays are secondary.** A weekday's offset is its daily level minus the average of the surrounding 7 days (centred window, at least 5 days present). It is called cheaper/pricier only if it clears its standard error **and** 0.3 cents (`WEEKDAY_MIN_OFFSET_CENTS`). The UI shows weekdays only in a collapsed section "Weekday differences", and only if at least one weekday is significant (`significant_weekdays`). On the dev data none is (the weekday spread is about 0.5 cents against about 13 cents for the hour).
 
-**Honest framing.** The summary shows both spreads side by side (about 13 cents between the best and worst hour, but under 0.5 cents between the best and worst weekday), so users learn that *the hour matters far more than the day*.
+**Brands** ([`brand_pattern.py`](../backend/app/services/brand_pattern.py)). Stations are grouped by brand (brands with fewer than 3 stations go to "Other", `BRAND_MIN_STATIONS`), the hour shape is learned per group over the last 120 days and the noon-type jump is located. If groups differ by less than 1 cent in jump size and less than 1 hour in timing, the single area-wide pattern is kept; otherwise per-brand patterns are reported (`brand_patterns`). **Finding on the dev data:** the timing is identical (12:00 for every brand), but the *size* differs by up to 7 cents (about 9 cents at Kuster Energy, about 16 at Shell). The cheapest and priciest hour are therefore the same for everyone; what differs is how much timing matters, and the UI shows this range in the "typical difference" tile.
 
-### 2.3 Market context (Brent oil and news)
+**Confidence** is *low* below 5 samples per weekday, *medium* below 9, otherwise *high* (in `_compute_forecast`); the text under the tiles says how many days the hour pattern is based on.
 
-This is context, not a forecast. It feeds the "Why this prediction?" section.
+### 2.3 Market context (Brent and news)
 
-- **Brent and pump price, 7 days:** percentage change of the latest daily level against about 7 days earlier. Shown only when both ends exist; otherwise "Not enough data".
-- **Oil to pump relationship:** the correlation between day-over-day *changes* in the pump price and Brent's changes, with Brent leading by 0 to 10 days. Changes are used, not levels, because two trending series correlate spuriously. It needs at least 20 paired days; |r| ≥ 0.3 counts as meaningful, otherwise "weak".
-- **Oil signal:** rising/falling if Brent moved more than ±2% over 7 days. Only when the relationship is meaningful *and* positive does the page mention upward or downward pressure.
-- **News:** articles from the last 72 hours are scored by a keyword list (for example OPEC, Hormuz, sanctions, refinery outage, each with a weight). Only articles scoring 2 or more are shown, the top 5. Stories unrelated to oil supply (such as electricity statistics) score 0 and are ignored. This is keyword matching, not language understanding.
+Context, not a forecast; it feeds "Why this prediction?".
+
+- **Brent and pump price, 7 days:** change of the latest daily level against about 7 days earlier, shown only when both ends exist.
+- **Oil to pump relationship:** correlation of day-over-day *changes* with Brent leading by 0 to 10 days, at least 20 paired days; |r| ≥ 0.3 counts as meaningful.
+- **Oil signal:** rising/falling if Brent moved more than ±2% over 7 days. Pressure is only mentioned when the relationship is meaningful and positive.
+- **News:** articles of the last 72 hours scored by a keyword list; only articles with score ≥ 2 are shown (top 5). This is keyword matching, not language understanding.
 
 ---
 
 ## 3. Go Now indicator
 
-Code: `get_go_now_indicator` in [`backend/app/routers/prices.py`](../backend/app/routers/prices.py), UI in `GoNowIndicator.svelte`. Endpoint: `GET /api/prices/analytics/go-now`.
+Code: [`services/go_now.py`](../backend/app/services/go_now.py) (pure decision logic, used by the endpoint **and** the backtest), `get_go_now_indicator` in [`routers/prices.py`](../backend/app/routers/prices.py), [`services/go_now_backtest.py`](../backend/app/services/go_now_backtest.py); UI in `GoNowIndicator.svelte`. Endpoint: `GET /api/prices/analytics/go-now`.
 
-**Question.** Is the best price right now cheap compared with what is normal at this time of day, and is it going up or down?
+**Question.** Is the best price right now cheap compared with what is normal at this time of day, and is it going up or down? It is not a forecast; it ranks the present against the recent past. The backtest checks whether the labels really sort decisions by what going now saved.
 
-It is **not** a forecast of future prices. It ranks the present against the recent past.
+**Step 1: current best price.** Each station's *latest* price row counts if it is at most 30 minutes old (`GO_NOW_FRESH_MINUTES`) and the station is open. The lowest is the current best price; the station and the price's age are returned.
 
-**Step 1: the current best price.** Each station's *latest* price row is taken. A station only counts if its latest row is **at most 30 minutes old** and the station is open. The lowest of those is the "current best price". The station name and the age of the price are returned, so the recommendation can never point to a price that is no longer offered.
+**Optional station filter.** `station_id`, or `lat` + `lon` + `max_distance_km` (up to 100 km), restricts both the current price and the history to those stations; the response says which filter was used (`filter`). The UI has one compact select in the card header ("All stations" or "Within 5/10/25 km"); "near me" asks the browser for the location once and does not store it (nginx allows geolocation for the site itself).
 
-**Step 2: same-hour percentile.** The past 7 days are reduced to one number per hour: the lowest price across all stations in that hour. The current price is then ranked against the values from the *same time of day* (current hour ±1 hour, Berlin time). This matters because of the noon jump: a 7:00 price must be compared with other early-morning prices, not with cheap evening prices.
+**Step 2: same-hour percentile.** The past 7 days are reduced to one value per hour (the lowest price across the considered stations). The current price is ranked against the values from the same time of day (current hour ±1 h). At least 6 same-hour points are needed, otherwise all hours are used (at least 12), otherwise "insufficient data".
 
-```
-percentile = (number of hourly lows <= current price) / (number of hourly lows) x 100
-```
+**Step 3: trend.** Two methods are implemented ([`trend_slope`](../backend/app/services/go_now.py)); the config selects one (`GO_NOW_TREND_METHOD`): *legacy* (least-squares slope over the hourly lows of the last 3 hours) and *robust* (Theil-Sen slope over the last 6 hours, with the hour-of-day shape removed). The backtest kept **legacy**: the robust slope scored lower out of sample (0.85 vs. 0.91 cents of separation).
 
-A low percentile means cheap. The page shows "Cheaper than (100 − percentile)% of prices at this time of day".
+**Step 4: jump-aware rule.** The hour of the typical price jump (and its size) is **learned** from the hour-of-day shape of the previous 28 days, not hard-coded to 12:00 (`typical_jump`; needs a jump of at least 1 cent). In the 1 to 2 hours before that jump (`GO_NOW_PRE_JUMP_MIN_H`/`MAX_H`) a *falling* trend is neutralised: it can neither cause "wait" (waiting for a drop that is about to reverse) nor upgrade a cheap price to "excellent". (The task text said it must not trigger "wait or good"; "good" does not depend on a falling trend, so the upgrade to "excellent" is what was neutralised.) The backtest turned this on: it raised the out-of-sample score for the legacy trend (1.01 vs. 0.91).
 
-Data requirements: at least 6 same-hour data points. If fewer exist, it falls back to all hours of the week, which needs at least 12 points; below that the result is "insufficient data".
-
-**Step 3: short-term trend.** A straight line (least squares) is fitted through the hourly lows of the **last 3 hours**. Its slope in cents per hour is *falling* below −0.1, *rising* above +0.1, otherwise *stable*. At least two hourly values are needed.
-
-**Step 4: the recommendation.**
+**Step 5: recommendation** (cut-offs tuned by the backtest, see below):
 
 | Percentile | Falling | Stable | Rising |
 |---|---|---|---|
-| ≤ 35 (cheap) | **excellent** | good | good (grab it before it rises) |
-| 36 to 65 (middle) | neutral | neutral | wait |
-| > 65 (expensive) | wait | wait | **avoid** |
+| ≤ 25 (cheap) | **excellent** | good | good |
+| 26 to 75 (middle) | neutral | neutral | wait |
+| > 75 (expensive) | wait | wait | **avoid** |
 
-The week low, median and high shown on the card are taken from the same set of hourly lows used for the percentile.
+Trend threshold ±0.2 cents per hour (`GO_NOW_TREND_THRESHOLD_C_PER_H`).
 
-**Limits.** It uses the lowest price across all stations, so it answers "is there a good price somewhere near me?", not "is *my* usual station cheap?". With a 3-hour window the trend is noisy, which is why it only nudges between the labels above.
+### The backtest and what it showed
+
+[`go_now_backtest.py`](../backend/app/services/go_now_backtest.py) reproduces the decision for every hour with enough data using only data available then, and measures the outcome: *saving (a)* = mean best price over the next 6 h − best price now, *saving (b)* = minimum best price over the next 12 h − best price now. Positive means going now saved money. (The task text's "now minus future" contradicts its own "positive = saved"; the economically correct "future minus now" is used.) Outcomes need at least 70% of the future cycles to exist. Parameters (percentile cut-offs, trend threshold, trend method, jump-aware on/off) were tuned by grid search on the first half of the data and are reported on the second half; they are adopted only if they beat the old values out of sample by 0.1 cent.
+
+Result on the dev data (E5, second half, [full report](go-now-backtest.md)): separation between "go" labels (excellent/good) and "stay" labels (wait/avoid) rose from **0.91 to 1.35 cents** per litre with the tuned values (25/75, ±0.2 c/h, legacy trend, jump-aware). **Excellent beats wait by 1.21 cents (95% CI 0.78 to 1.67, excludes 0).** The tuned values are stored in `go_now_params.json`, which the config module reads.
+
+**Limits.** It uses the lowest price across the considered stations (hence the optional filter). Dev data are not continuous, so production numbers will differ.
 
 ---
 
 ## 4. Literboard
 
-Code: `get_top_stations` in [`backend/app/routers/prices.py`](../backend/app/routers/prices.py), UI in `Statistics.svelte` (leaderboard mode). Endpoint: `GET /api/prices/analytics/top-stations`. It lives on the Statistics page below the heatmap.
+Code: `get_top_stations` in [`routers/prices.py`](../backend/app/routers/prices.py), [`services/literboard.py`](../backend/app/services/literboard.py); UI in `Statistics.svelte` (leaderboard mode, below the heatmap on the Statistics tab). Endpoint: `GET /api/prices/analytics/top-stations`.
 
-**Ranking.** Stations are ranked by their **average price over the selected period** (the period chosen at the top of the page), cheapest first. The top 10 are shown, each with its average, minimum, maximum and range for that period.
+**Ranking.** By average price over the selected period, cheapest first.
 
-**"Cheapest X% of the time".** For every hour in the period, each station's lowest price in that hour is ranked against all other stations. The station with the lowest value is "cheapest" for that hour (ties all count). The percentage is the number of hours a station was cheapest divided by the number of hours with any data. This is a real count, not an estimate.
+**Data volume behind every figure.** Each row carries `hours_with_data`, `days_with_data` and `stability_days`; the UI shows them as small muted text. **Stations with too little data are not ranked** next to well-covered ones: a station needs at least 6 hours of data (or all hours that exist in a shorter window; `LITERBOARD_MIN_HOURS`) and at least 50% of the hours of the best-covered station (`LITERBOARD_MIN_DATA_SHARE`). The others are listed at the end with "Not enough data" (at most 5, `LITERBOARD_MAX_UNRANKED`).
 
-**Stability** (always measured over a fixed 30-day window, so a station's label does not change just because the user picks a different period).
+**"Cheapest X% of the time".** For every hour, each station's lowest price is ranked against all others; rank 1 (ties all count) means cheapest. Default: share of all hours with data in the window. With `opening_hours_weighted=true` (a small "by opening hours" toggle in the leaderboard header): share of the hours **the station itself had data**. Price rows are only stored while a station is open (and the open status itself is stored only as its *current* state, not as a history), so "hours with data" is the available measure of "open hours". Stability is already computed over open hours only, so the flag changes this share only.
 
-An earlier version used the raw standard deviation of all prices. That labelled every station "very volatile", because all stations share the daily noon jump and any longer-term price level change. The current method asks a more useful question: *how big are this station's daily price swings compared with other stations?*
+**Stability** is measured over a fixed window (`LITERBOARD_STABILITY_DAYS`, **30 days**, so the label does not change with the selected period):
 
-1. For each station and each local day, take the **daily range** = highest minus lowest price that day. Only days with at least 48 observations (about 12 hours of 15-minute data) count.
-2. Average these daily ranges (the "daily swing", shown in cents). A station needs at least 7 qualifying days.
-3. Divide by the **median** daily swing of all stations to get a ratio.
+1. per station and local day, the **daily range** = highest minus lowest price (days with at least 48 observations only);
+2. average of these ranges = the **daily swing** (needs at least 7 qualifying days);
+3. divided by the **median** swing of all stations.
 
-| Ratio vs. typical station | Label |
+| Ratio | Label |
 |---|---|
-| up to 0.75 | Very stable |
-| up to 0.92 | Stable |
-| up to 1.08 | Typical |
-| up to 1.25 | Volatile |
-| above 1.25 | Very volatile |
+| ≤ 0.75 | Very stable |
+| ≤ 0.92 | Stable |
+| ≤ 1.08 | Typical |
+| ≤ 1.25 | Volatile |
+| > 1.25 | Very volatile |
 
-The label is relative by design: "Typical" means "about as swingy as the median station". A station with fewer than 7 qualifying days shows "Not enough data". The bar under each station is the ratio, where 50% of the bar equals the typical station.
+**Why 30 days and not longer.** A longer window was considered. [`literboard_check.py`](../backend/app/services/literboard_check.py) measures how well a station's stability in a window of *W* days predicts its stability in the following 30 days (rank correlation): **30 days 0.75, 60 days 0.72, 90 days 0.69**. Longer windows predict slightly *worse* (older behaviour no longer applies), so 30 days is kept. The value is a config setting.
 
 ---
 
-## 5. Known limitations
+## 5. Configuration, tables and migrations
 
-- **Single-area average.** The Outlook trend and weekday pattern describe the *average over all tracked stations*, not an individual station.
-- **Short oil and news history.** Brent is collected hourly, but on the development database only a few weeks exist. Until about 20 to 60 overlapping days are available, oil inputs cannot be validated and are not used. Production data should improve this automatically.
-- **Keyword news scoring** can include irrelevant articles that happen to mention a keyword, and miss relevant ones that do not.
-- **Prices are stored every 15 minutes even when unchanged,** so counts per station reflect collection frequency, not the number of real price changes. The statistics are built to avoid depending on this (hourly buckets, daily ranges), but exact timing of price changes is not known.
-- **Not advice.** Everything here is a statistical description of past data. The Outlook page, the Go Now indicator and the Literboard help with decisions; they do not guarantee any future price.
+**Config:** every threshold is in [`analytics_config.py`](../backend/app/analytics_config.py) with a comment saying "default", "requested" or "backtest" (groups: Go Now, backtest gates, market data, trend model, reliability, probability, hourly, best time and brands, Literboard).
 
-## Where to improve next
+**Tables** (created at start-up by `create_all` and `schema_migrations.py`; SQL for manual deployments in [`migrations/`](../migrations/); the project uses plain SQL migrations, not Alembic): `market_prices` (`006`), `nl_fuel_prices` and refuel reference columns (`005`), `refuel_logs` and `password_changed_at` (`004`).
 
-1. Run on production data. The trend model re-tests itself automatically and will start using a variant as soon as one proves better than the baseline.
-2. Store Brent from more than one source and at finer resolution, with a consensus value.
-3. Store news with timestamps and a per-article relevance label instead of keyword weights.
-4. Store a price only when it changes, together with a "last confirmed" time.
-5. Only then consider a heavier model, and accept it only if it beats the current ridge model in the same backtest.
+---
+
+## 6. Known limitations
+
+- **Single-area average.** The trend and hour pattern describe the average over all tracked stations; brands differ in the *size* of the noon jump.
+- **Short history on the dev database.** About 200 usable days: models cannot show an edge over "no change", the probability model and the hourly model are not validated. Production data should help; the models re-test themselves.
+- **Free market proxies.** Gasoil and RBOB futures are US benchmarks used as stand-ins for ICE gasoil and Eurobob. Yahoo Finance is an unofficial source and can change.
+- **News scoring is keyword based** and can include irrelevant or miss relevant articles.
+- **Prices are stored every 15 minutes even when unchanged.** All statistics use hourly buckets or daily ranges to avoid depending on that, but exact times of price changes are unknown.
+- **Opening hours are only known as "hours with data"** (no history of the open flag).
+- **The Go Now backtest uses the lowest price across stations**, so it is a statement about "a good price somewhere nearby", not about one station.
+- **Not advice.** All numbers describe past data.
+
+## 7. Where to improve next
+
+1. Run on production data: the trend, probability and hourly models re-test themselves and switch on when they win.
+2. Paid or official refined-product data (ICE gasoil, Eurobob/ARA) if the free proxies turn out to be the limiting factor.
+3. Store a price only when it changes, with a "last confirmed" time, and a history of the open flag.
+4. Per-article news relevance labels instead of keyword weights.
+5. Only if all of the above is not enough: a heavier model, accepted only if it beats the ridge model in the same backtest.
