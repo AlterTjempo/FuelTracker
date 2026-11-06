@@ -116,6 +116,8 @@ class User(Base):
         nullable=False,
         default=lambda: datetime.now(timezone.utc),
     )
+    # Tokens issued before this moment are rejected (set on password change).
+    password_changed_at = Column(TIMESTAMP(timezone=True), nullable=True)
 
     favorites = relationship(
         "FavoriteStation", back_populates="user", cascade="all, delete-orphan"
@@ -144,6 +146,33 @@ class FavoriteStation(Base):
     __table_args__ = (
         Index("idx_favorite_user_station", "user_id", "station_id", unique=True),
     )
+
+
+class RefuelLog(Base):
+    """A refuelling session logged by a user (basis of the savings meter)."""
+
+    __tablename__ = "refuel_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    station_id = Column(String, ForeignKey("stations.id"), nullable=True)
+    fuel_type = Column(String, nullable=False)  # e5 | e10 | diesel
+    liters = Column(Float, nullable=False)
+    price_per_liter = Column(Float, nullable=False)
+    fueled_at = Column(TIMESTAMP(timezone=True), nullable=False)
+    created_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    station = relationship("Station")
+
+    __table_args__ = (Index("idx_refuel_user_time", "user_id", "fueled_at"),)
 
 
 class VisitorLocationCache(Base):

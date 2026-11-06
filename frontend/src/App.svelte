@@ -10,6 +10,8 @@
   import PriceHeatmap from './components/PriceHeatmap.svelte'
   import UserMenu from './components/UserMenu.svelte'
   import Favorites from './components/Favorites.svelte'
+  import Outlook from './components/Outlook.svelte'
+  import Savings from './components/Savings.svelte'
   import { currentUser } from './lib/auth.js'
   import { getMe, trackPageView } from './lib/api.js'
   
@@ -54,6 +56,8 @@
 
     refreshCurrentUser()
   })
+
+  $: if (!$currentUser && activeTab === 'savings') activeTab = 'overview'
 
   $: if (activeTab && activeTab !== lastTrackedPage) {
     lastTrackedPage = activeTab
@@ -115,19 +119,27 @@
       </div>
     </div>
 
-    <div class="tabs">
-      <button class:active={activeTab === 'overview'} on:click={() => activeTab = 'overview'}>
-        📊 Overview
+    <div class="tabs" role="tablist">
+      <button role="tab" aria-selected={activeTab === 'overview'} class:active={activeTab === 'overview'} on:click={() => activeTab = 'overview'}>
+        <span class="tab-icon">📊</span><span>Overview</span>
       </button>
-      <button class:active={activeTab === 'statistics'} on:click={() => activeTab = 'statistics'}>
-        📈 Statistics
+      <button role="tab" aria-selected={activeTab === 'statistics'} class:active={activeTab === 'statistics'} on:click={() => activeTab = 'statistics'}>
+        <span class="tab-icon">📈</span><span>Statistics</span>
       </button>
-      <button class:active={activeTab === 'leaderboard'} on:click={() => activeTab = 'leaderboard'}>
-        🏆 Literboard
+      <button role="tab" aria-selected={activeTab === 'outlook'} class:active={activeTab === 'outlook'} on:click={() => activeTab = 'outlook'}>
+        <span class="tab-icon">🔮</span><span>Outlook</span>
       </button>
-      <button class:active={activeTab === 'stations'} on:click={() => activeTab = 'stations'}>
-        ⛽ All Stations
+      <button role="tab" aria-selected={activeTab === 'leaderboard'} class:active={activeTab === 'leaderboard'} on:click={() => activeTab = 'leaderboard'}>
+        <span class="tab-icon">🏆</span><span>Literboard</span>
       </button>
+      <button role="tab" aria-selected={activeTab === 'stations'} class:active={activeTab === 'stations'} on:click={() => activeTab = 'stations'}>
+        <span class="tab-icon">⛽</span><span>Stations</span>
+      </button>
+      {#if $currentUser}
+        <button role="tab" aria-selected={activeTab === 'savings'} class:active={activeTab === 'savings'} on:click={() => activeTab = 'savings'}>
+          <span class="tab-icon">💰</span><span>Savings</span>
+        </button>
+      {/if}
     </div>
 
     {#if activeTab === 'overview'}
@@ -173,6 +185,20 @@
           <PriceHeatmap fuelType={selectedFuelType} />
         </div>
       {/if}
+    {:else if activeTab === 'outlook'}
+      {#if selectedFuelType === 'oil'}
+        <div class="card">
+          <div class="oil-notice">🔮 The weekly outlook is based on pump prices. <br> Switch to E5, E10, or Diesel to see it. Oil context is shown inside the outlook.</div>
+        </div>
+      {:else}
+        <div class="card">
+          <Outlook fuelType={selectedFuelType} />
+        </div>
+      {/if}
+    {:else if activeTab === 'savings' && $currentUser}
+      <div class="card">
+        <Savings selectedFuelType={selectedFuelType} />
+      </div>
     {:else if activeTab === 'leaderboard'}
       {#if selectedFuelType === 'oil'}
         <div class="card">
@@ -258,9 +284,13 @@
 
   .fuel-selector, .time-selector {
     display: flex;
-    gap: 0.375rem;
+    gap: 0.25rem;
     align-items: center;
     flex-wrap: wrap;
+  }
+
+  .fuel-selector button, .time-selector button {
+    padding: 0.5rem 0.55rem;
   }
 
   .tabs {
@@ -269,13 +299,10 @@
     margin-bottom: 1rem;
     border-bottom: 2px solid #30363d;
     padding-bottom: 0;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
-  }
-
-  .tabs::-webkit-scrollbar {
-    display: none;
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    background: #0f1419;
   }
 
   .tabs button {
@@ -283,15 +310,40 @@
     border: none;
     border-bottom: 2px solid transparent;
     color: #8b949e;
-    padding: 0.625rem 0.875rem;
+    padding: 0.5rem 0.25rem;
     border-radius: 0;
     cursor: pointer;
     font-weight: 500;
-    font-size: 0.875rem;
     transition: all 0.2s;
     margin-bottom: -2px;
     white-space: nowrap;
-    flex-shrink: 0;
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.125rem;
+    font-size: 0.7rem;
+  }
+
+  .tab-icon {
+    font-size: 1.1rem;
+    line-height: 1;
+  }
+
+  :global(button:focus-visible),
+  :global(a:focus-visible),
+  :global(input:focus-visible),
+  :global(select:focus-visible) {
+    outline: 2px solid #58a6ff;
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    :global(*) {
+      transition: none !important;
+      animation: none !important;
+    }
   }
 
   .tabs button:hover {
@@ -412,9 +464,20 @@
       gap: 0.5rem;
     }
 
+    .fuel-selector button, .time-selector button {
+      padding: 0.5rem 1rem;
+    }
+
     .tabs button {
-      padding: 0.75rem 1.25rem;
+      padding: 0.75rem 1rem;
       font-size: 0.95rem;
+      flex-direction: row;
+      justify-content: center;
+      gap: 0.5rem;
+    }
+
+    .tab-icon {
+      font-size: 1rem;
     }
 
     label {
@@ -467,7 +530,7 @@
     }
 
     .tabs button {
-      padding: 0.75rem 1.5rem;
+      padding: 0.75rem 1.25rem;
       font-size: 1rem;
     }
 

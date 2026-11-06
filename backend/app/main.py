@@ -1,5 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+import asyncio
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from slowapi import _rate_limit_exceeded_handler
@@ -12,7 +14,7 @@ from database import engine, Base
 from routers import stations, prices
 from routers import oil_prices
 from routers import energy_news
-from routers import auth, favorites, analytics, admin
+from routers import auth, favorites, analytics, admin, insights, savings
 from services.data_collector import DataCollector
 from services.oil_collector import OilCollector
 from services.news_collector import NewsCollector
@@ -50,14 +52,25 @@ async def lifespan(app: FastAPI):
     # Start scheduler
     scheduler.start()
 
-    # Run initial fetches
-    await collector.fetch_and_store_prices()
-    await oil_collector.fetch_and_store()
-    await news_collector.fetch_and_store()
+    # Run initial fetches in the background so the API accepts requests
+    # immediately instead of refusing connections while collectors run.
+    async def initial_fetch():
+        for job in (
+            collector.fetch_and_store_prices,
+            oil_collector.fetch_and_store,
+            news_collector.fetch_and_store,
+        ):
+            try:
+                await job()
+            except Exception as exc:
+                print(f"Initial fetch failed ({job.__qualname__}): {exc}")
+
+    initial_task = asyncio.create_task(initial_fetch())
 
     yield
 
     # Shutdown: Stop scheduler
+    initial_task.cancel()
     scheduler.shutdown()
 
 
@@ -75,12 +88,19 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+# Compress JSON responses (history/heatmap payloads compress ~10x)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
 # CORS middleware — restrict origins in production
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.get_allowed_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "DELETE"],  # Auth and favorites need POST/DELETE
+    allow_methods=[
+        "GET",
+        "POST",
+        "DELETE",
+    ],  # Auth, favorites, savings need POST/DELETE
     allow_headers=["*"],
 )
 
@@ -93,6 +113,8 @@ app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(favorites.router, prefix="/api/favorites", tags=["favorites"])
 app.include_router(analytics.router, prefix="/api/analytics", tags=["analytics"])
 app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
+app.include_router(insights.router, prefix="/api/insights", tags=["insights"])
+app.include_router(savings.router, prefix="/api/savings", tags=["savings"])
 
 
 @app.get("/")

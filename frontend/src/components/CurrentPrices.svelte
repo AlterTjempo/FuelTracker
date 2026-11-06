@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte'
+  import { poll } from '../lib/poll.js'
   import API_BASE, { safeFetch, addFavorite, removeFavorite, getFavorites } from '../lib/api.js'
   import { currentUser } from '../lib/auth.js'
   import StationDetail from './StationDetail.svelte'
@@ -67,7 +68,7 @@
   
   onMount(() => {
     fetchPrices()
-    const interval = setInterval(fetchPrices, 60000)
+    const interval = poll(fetchPrices, 60000)
     return () => clearInterval(interval)
   })
 

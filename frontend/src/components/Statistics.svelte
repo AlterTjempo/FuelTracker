@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte'
+  import { poll } from '../lib/poll.js'
   import API_BASE, { safeFetch } from '../lib/api.js'
   
   export let fuelType = 'e5'
@@ -46,7 +47,7 @@
   
   onMount(() => {
     fetchStats()
-    const interval = setInterval(fetchStats, 60000)
+    const interval = poll(fetchStats, 60000)
     return () => clearInterval(interval)
   })
   
