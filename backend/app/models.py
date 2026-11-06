@@ -180,6 +180,24 @@ class RefuelLog(Base):
     __table_args__ = (Index("idx_refuel_user_time", "user_id", "fueled_at"),)
 
 
+class MarketPrice(Base):
+    """Refined products, Brent (USD) and EUR/USD (see analytics_config.MARKET_SERIES)."""
+
+    __tablename__ = "market_prices"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    timestamp = Column(TIMESTAMP(timezone=True), nullable=False)
+    series = Column(
+        String, nullable=False
+    )  # e.g. gasoil_proxy, rbob, eurusd, brent_usd
+    source = Column(String, nullable=False)  # e.g. yahoo:HO=F or yahoo:HO=F:daily
+    value = Column(Float, nullable=False)
+
+    __table_args__ = (
+        Index("idx_market_series_time", "series", "timestamp", unique=True),
+    )
+
+
 class NlFuelPrice(Base):
     """Dutch national average pump prices (CBS open data), one row per day."""
 

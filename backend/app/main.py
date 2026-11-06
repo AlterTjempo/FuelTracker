@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 import asyncio
+from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from slowapi import _rate_limit_exceeded_handler
@@ -18,6 +19,7 @@ from routers import auth, favorites, analytics, admin, insights, savings
 from services.data_collector import DataCollector
 from services.oil_collector import OilCollector
 from services.news_collector import NewsCollector
+from services.market_collector import MarketCollector
 from services.nl_collector import NlCollector
 from config import settings
 
@@ -35,6 +37,7 @@ async def lifespan(app: FastAPI):
     oil_collector = OilCollector()
     news_collector = NewsCollector()
     nl_collector = NlCollector()
+    market_collector = MarketCollector()
 
     # Fetch fuel prices every 15 minutes
     scheduler.add_job(
@@ -56,6 +59,20 @@ async def lifespan(app: FastAPI):
         nl_collector.fetch_and_store, "interval", hours=12, id="fetch_nl_prices"
     )
 
+    # Refined products, Brent (USD) and EUR/USD: hourly
+    scheduler.add_job(
+        market_collector.fetch_and_store, "interval", hours=1, id="fetch_market_prices"
+    )
+
+    # Keep the (slow, ~10 s) trend results warm; first run shortly after start-up
+    scheduler.add_job(
+        insights.warm_trend_cache,
+        "interval",
+        minutes=20,
+        id="warm_trend_cache",
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=90),
+    )
+
     # Start scheduler
     scheduler.start()
 
@@ -67,6 +84,8 @@ async def lifespan(app: FastAPI):
             oil_collector.fetch_and_store,
             news_collector.fetch_and_store,
             lambda: nl_collector.fetch_and_store(days=1000),
+            market_collector.backfill,
+            market_collector.fetch_and_store,
         ):
             try:
                 await job()

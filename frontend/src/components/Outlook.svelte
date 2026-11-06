@@ -73,17 +73,19 @@
   $: anyModel = trend && !trend.insufficient_data && trend.any_model_beats_baseline
   $: baselineMae = trend?.horizons?.length ? trend.horizons[0].baseline_mae_cents : null
 
-  $: reliability = (() => {
-    if (!headline) return null
-    if (!headline.beats_baseline) {
-      return { level: 'Low', tone: 'low', note: 'No model beats "no change" yet' }
-    }
-    const s = headline.skill_vs_persistence
-    return s >= 0.2
-      ? { level: 'High', tone: 'high', note: `Beats baseline by ${Math.round(s * 100)}% in backtests` }
-      : s >= 0.08
-        ? { level: 'Medium', tone: 'mid', note: `Beats baseline by ${Math.round(s * 100)}% in backtests` }
-        : { level: 'Low', tone: 'low', note: `Only ${Math.round(s * 100)}% better than baseline` }
+  // Reliability comes from the backend and is based on out-of-sample metrics
+  // (skill vs. baseline, Diebold-Mariano test, band calibration).
+  const TONES = { High: 'high', Medium: 'mid', Low: 'low' }
+  $: reliability = headline?.reliability
+    ? { level: headline.reliability.level, tone: TONES[headline.reliability.level] || 'low', note: headline.reliability.why }
+    : null
+
+  // One extra line only when the probability model passed validation (calibration + Brier skill).
+  $: probLine = (() => {
+    const hs = trend?.probability?.horizons?.filter((h) => h.validated && h.probability !== null) || []
+    if (!hs.length) return ''
+    const h = hs[0]
+    return `${Math.round(h.probability * 100)}% chance of a rise of more than ${trend.probability.x_cents} cent in the next ${h.hours} h`
   })()
 
   const VERDICT = {
@@ -175,7 +177,7 @@
         </div>
 
         <div class="hero-foot">
-          <span class="badge" data-tone={reliability.tone}>Reliability: {reliability.level}</span>
+          <span class="badge" data-tone={reliability.tone} title={reliability.note}>Reliability: {reliability.level}</span>
           <span class="explain">
             {#if headline.beats_baseline}
               {reliability.note}.
@@ -184,6 +186,7 @@
               The model doesn't see a reliable upward or downward trend. Day-to-day moves are within
               normal noise{#if baselineMae !== null}{' '}(about ±{baselineMae}¢/L per day){/if}.
             {/if}
+            {#if probLine}<strong class="prob">{probLine}.</strong>{/if}
           </span>
         </div>
       {/if}
@@ -371,7 +374,7 @@
         <div class="table-wrap">
           <table>
             <thead>
-              <tr><th>Ahead</th><th>Model used</th><th>Typical error</th><th>Baseline error</th><th>Improvement</th><th>Tested days</th></tr>
+              <tr><th>Ahead</th><th>Model used</th><th>Typical error</th><th>Baseline error</th><th>Improvement</th><th>Significance (p)</th><th>80% band hit</th><th>Tested days</th></tr>
             </thead>
             <tbody>
               {#each trend.horizons as h}
@@ -384,6 +387,8 @@
                     {#if h.skill_vs_persistence === null}–
                     {:else}{h.skill_vs_persistence > 0 ? '+' : '−'}{Math.abs(Math.round(h.skill_vs_persistence * 100))}%{h.beats_baseline ? '' : ' (not used)'}{/if}
                   </td>
+                  <td>{h.dm_p_eval ?? '–'}</td>
+                  <td>{h.coverage80 !== undefined ? Math.round(h.coverage80 * 100) + '%' : '–'}</td>
                   <td>{h.n_test}</td>
                 </tr>
               {/each}
@@ -470,6 +475,7 @@
   .badge[data-tone='high'] { color: #10b981; border-color: rgba(16,185,129,0.5); }
   .badge[data-tone='mid'] { color: #58a6ff; border-color: rgba(88,166,255,0.5); }
   .badge[data-tone='low'] { color: #f59e0b; border-color: rgba(245,158,11,0.45); }
+  .prob { display: block; margin-top: 0.25rem; color: #e6edf3; }
   .explain { color: #c9d1d9; font-size: 0.88rem; line-height: 1.5; }
 
   /* tiles */

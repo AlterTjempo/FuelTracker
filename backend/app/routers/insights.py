@@ -15,11 +15,12 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from cache import cached
+from cache import cached, refresh
+from database import SessionLocal
 from database import get_db
 from limiter import limiter
 from services.forecast_model import build_trend_forecast
-from models import EnergyNews, FuelPrice, OilPrice
+from models import EnergyNews, FuelPrice, MarketPrice, OilPrice
 
 router = APIRouter()
 
@@ -484,14 +485,37 @@ def _daily_news_scores(db: Session, since: datetime) -> dict:
     return out
 
 
+def _daily_market(db: Session, since: datetime) -> dict:
+    """Daily mean of each market series (gasoil proxy, RBOB, EUR/USD, Brent USD) per Berlin day."""
+    day = func.date(func.timezone(TZ_NAME, MarketPrice.timestamp))
+    out: dict = defaultdict(dict)
+    for series, d, value in (
+        db.query(MarketPrice.series, day, func.avg(MarketPrice.value))
+        .filter(MarketPrice.timestamp >= since)
+        .group_by(MarketPrice.series, day)
+        .all()
+    ):
+        out[series][d] = float(value)
+    return dict(out)
+
+
 def _compute_trend(db: Session, fuel_type: str):
     column = FUEL_COLUMNS[fuel_type]
     now = datetime.now(timezone.utc)
     since = now - timedelta(days=TREND_LOOKBACK_DAYS)
-    price = _daily_levels(_build_daily(_hourly_series(db, column, since)))
+    days = _build_daily(_hourly_series(db, column, since))
+    price = _daily_levels(days)
     oil = _daily_oil(db, since)
     news = _daily_news_scores(db, since)
-    result = build_trend_forecast(price, oil, news, now.astimezone(TZ).date())
+    market = _daily_market(db, since)
+    result = build_trend_forecast(
+        price,
+        oil,
+        news,
+        now.astimezone(TZ).date(),
+        market=market,
+        hourly_days=days,
+    )
     result["fuel_type"] = fuel_type
     # The exact daily series the model uses, for charting (last 60 days; gaps stay gaps).
     result["history"] = [
@@ -517,3 +541,19 @@ def get_trend_forecast(
     return cached(
         ("trend", fuel_type), TREND_CACHE_SECONDS, lambda: _compute_trend(db, fuel_type)
     )
+
+
+def warm_trend_cache() -> None:
+    """Scheduled job: recompute the trend results so requests never wait ~10 s."""
+    for fuel_type in FUEL_COLUMNS:
+        db = SessionLocal()
+        try:
+            refresh(
+                ("trend", fuel_type),
+                TREND_CACHE_SECONDS,
+                lambda: _compute_trend(db, fuel_type),
+            )
+        except Exception as exc:  # never let a failed warm-up break the scheduler
+            print(f"[trend warm-up] {fuel_type}: {type(exc).__name__}")
+        finally:
+            db.close()
