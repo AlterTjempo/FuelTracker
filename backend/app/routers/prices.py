@@ -662,7 +662,7 @@ def get_go_now_indicator(
 
 @router.get("/analytics/top-stations")
 @limiter.limit("30/minute")
-@ttl_cached(300)
+@ttl_cached(900)  # prices change every 15 minutes; this is the heaviest aggregate
 def get_top_stations(
     request: Request,
     fuel_type: str = Query("e5", pattern="^(e5|e10|diesel)$"),
@@ -690,6 +690,8 @@ def get_top_stations(
 
     # Ranking window statistics for every station (all stations: eligibility needs the full picture)
     hour_bucket = func.date_trunc("hour", FuelPrice.timestamp).label("hour_bucket")
+    # One aggregation over the window, reused for hours-with-data, the cheapest share and the
+    # number of hours in the window (previously three separate scans of the whole table).
     per_station_hour = (
         db.query(
             hour_bucket,
@@ -698,29 +700,33 @@ def get_top_stations(
         )
         .filter(FuelPrice.timestamp >= since, fuel_column.isnot(None))
         .group_by(hour_bucket, FuelPrice.station_id)
-        .subquery()
+        .cte("per_station_hour")
     )
-    hours_by_station = {
-        r.station_id: r.n
-        for r in db.query(
-            per_station_hour.c.station_id, func.count().label("n")
-        ).group_by(per_station_hour.c.station_id)
-    }
-    total_hours = (
-        db.query(func.count(func.distinct(hour_bucket)))
-        .filter(FuelPrice.timestamp >= since, fuel_column.isnot(None))
-        .scalar()
-        or 0
-    )
-    days_by_station = {
-        r.station_id: r.n
-        for r in db.query(
-            FuelPrice.station_id,
-            func.count(func.distinct(local_day)).label("n"),
+    ranked_cte = db.query(
+        per_station_hour.c.station_id,
+        func.rank()
+        .over(
+            partition_by=per_station_hour.c.hour_bucket,
+            order_by=per_station_hour.c.min_price,
         )
-        .filter(FuelPrice.timestamp >= since, fuel_column.isnot(None))
-        .group_by(FuelPrice.station_id)
-    }
+        .label("rnk"),
+        func.dense_rank()
+        .over(order_by=per_station_hour.c.hour_bucket)
+        .label("hour_no"),
+    ).cte("ranked")
+    coverage_rows = (
+        db.query(
+            ranked_cte.c.station_id,
+            func.count().label("hours"),
+            func.count().filter(ranked_cte.c.rnk == 1).label("cheapest"),
+            func.max(ranked_cte.c.hour_no).label("window_hours"),
+        )
+        .group_by(ranked_cte.c.station_id)
+        .all()
+    )
+    hours_by_station = {r.station_id: r.hours for r in coverage_rows}
+    cheapest_counts = {r.station_id: r.cheapest for r in coverage_rows}
+    total_hours = max((r.window_hours for r in coverage_rows), default=0)
     station_stats = (
         db.query(
             FuelPrice.station_id,
@@ -731,6 +737,7 @@ def get_top_stations(
             func.min(fuel_column).label("min_price"),
             func.max(fuel_column).label("max_price"),
             func.count(FuelPrice.id).label("data_points"),
+            func.count(func.distinct(local_day)).label("days_with_data"),
         )
         .join(Station, FuelPrice.station_id == Station.id)
         .filter(FuelPrice.timestamp >= since, fuel_column.isnot(None))
@@ -769,24 +776,6 @@ def get_top_stations(
     swing_values = sorted(v[0] for v in swing_map.values())
     market_swing = swing_values[len(swing_values) // 2] if swing_values else None
 
-    # Cheapest share: for each hour bucket, rank stations by their minimum price
-    # in that hour; a station is "cheapest" for the hour if it holds rank 1 (ties all count).
-    ranked_sq = db.query(
-        per_station_hour.c.station_id,
-        func.rank()
-        .over(
-            partition_by=per_station_hour.c.hour_bucket,
-            order_by=per_station_hour.c.min_price,
-        )
-        .label("rnk"),
-    ).subquery()
-    cheapest_counts = {
-        r.station_id: r.n
-        for r in db.query(ranked_sq.c.station_id, func.count().label("n"))
-        .filter(ranked_sq.c.rnk == 1)
-        .group_by(ranked_sq.c.station_id)
-    }
-
     rows = []
     for stat in station_stats:
         swing_info = swing_map.get(stat.station_id)
@@ -817,7 +806,7 @@ def get_top_stations(
                 ),
                 "data_points": stat.data_points,
                 "hours_with_data": station_hours,
-                "days_with_data": days_by_station.get(stat.station_id, 0),
+                "days_with_data": stat.days_with_data,
                 "window_hours": total_hours,
                 "opening_hours_weighted": opening_hours_weighted,
             }

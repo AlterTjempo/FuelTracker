@@ -365,8 +365,9 @@ def _build_system(app, db: Session) -> dict:
     checks = [
         {
             "id": "jwt",
-            "label": "Login signing secret changed from the default",
-            "ok": settings.JWT_SECRET_KEY != DEFAULT_JWT_SECRET,
+            "label": "Login signing secret is custom and at least 32 characters",
+            "ok": settings.JWT_SECRET_KEY != DEFAULT_JWT_SECRET
+            and len(settings.JWT_SECRET_KEY) >= 32,
             "detail": "Set JWT_SECRET_KEY in config.env to a long random value.",
         },
         {
@@ -380,6 +381,12 @@ def _build_system(app, db: Session) -> dict:
             "label": "Sign-up CAPTCHA configured",
             "ok": bool(settings.RECAPTCHA_SECRET_KEY),
             "detail": "Set RECAPTCHA_SECRET_KEY, otherwise registration is not bot-protected.",
+        },
+        {
+            "id": "geoip",
+            "label": "Visitor IPs are not sent to a third-party geolocation service",
+            "ok": not settings.ENABLE_IP_GEOLOCATION,
+            "detail": "ENABLE_IP_GEOLOCATION=true sends visitor IP addresses to ipapi.co; disclose it in your privacy notice.",
         },
         {
             "id": "cors",

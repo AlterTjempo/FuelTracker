@@ -35,7 +35,7 @@ FUEL_COLUMNS = {"e5": FuelPrice.e5, "e10": FuelPrice.e10, "diesel": FuelPrice.di
 REFERENCE_WINDOW = timedelta(hours=1)
 MIN_REFERENCE_ROWS = 20
 MAX_LOGS_RETURNED = 200
-MAX_LOGS_PER_USER = 5000
+MAX_LOGS_PER_USER = 1000
 NL_MAX_AGE_DAYS = 10  # use the latest published Dutch figure at most this many days old
 TZ = ZoneInfo("Europe/Berlin")
 REFERENCE_LABELS = {

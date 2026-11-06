@@ -29,6 +29,13 @@ scheduler = AsyncIOScheduler()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: Create tables and start scheduler
+    if (
+        settings.JWT_SECRET_KEY == "overwritten-in-config-env-change-me"
+        or len(settings.JWT_SECRET_KEY) < 32
+    ):
+        print(
+            "WARNING: JWT_SECRET_KEY is the default or shorter than 32 characters. Set a long random value in config.env."
+        )
     Base.metadata.create_all(bind=engine)
     apply_schema_migrations(engine)
 
@@ -117,6 +124,7 @@ app = FastAPI(
     # Don't expose docs in production unless explicitly enabled
     docs_url="/docs" if settings.ENABLE_DOCS else None,
     redoc_url="/redoc" if settings.ENABLE_DOCS else None,
+    openapi_url="/openapi.json" if settings.ENABLE_DOCS else None,
 )
 
 # Expose the scheduler to the admin overview (read-only: job names and next runs)
@@ -155,9 +163,28 @@ app.include_router(insights.router, prefix="/api/insights", tags=["insights"])
 app.include_router(savings.router, prefix="/api/savings", tags=["savings"])
 
 
+# Responses that contain personal data must never be stored by browsers or proxies.
+_NO_STORE_PREFIXES = (
+    "/api/auth",
+    "/api/admin/system",
+    "/api/admin/users",
+    "/api/admin/traffic",
+    "/api/savings",
+    "/api/favorites",
+)
+
+
+@app.middleware("http")
+async def private_responses_not_cached(request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith(_NO_STORE_PREFIXES):
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @app.get("/")
 async def root():
-    return {"message": "FuelTracker API", "status": "running", "docs": "/docs"}
+    return {"message": "FuelTracker API", "status": "running"}
 
 
 @app.get("/health")

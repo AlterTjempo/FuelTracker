@@ -1,4 +1,5 @@
 <script>
+  let showMap = false
   import { onMount, createEventDispatcher } from 'svelte';
   import API_BASE, { safeFetch } from '../lib/api.js';
 
@@ -43,8 +44,11 @@
   });
 </script>
 
+<!-- Keyboard: Escape closes the panel (window keydown handler above). -->
+<!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
 <div class="detail-overlay" on:click={close}>
-  <div class="detail-panel" on:click|stopPropagation>
+  <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-noninteractive-element-interactions -->
+  <div class="detail-panel" role="dialog" aria-modal="true" aria-label="Station details" on:click|stopPropagation>
     <button class="back-btn" on:click={close}>← Back to list</button>
 
     {#if loading}
@@ -65,14 +69,23 @@
       </div>
 
       <div class="map-container">
-        <iframe
-          title="Station location"
-          width="100%"
-          height="250"
-          frameborder="0"
-          style="border-radius: 8px; border: 1px solid #30363d;"
-          src="https://www.openstreetmap.org/export/embed.html?bbox={station.longitude - 0.005}%2C{station.latitude - 0.003}%2C{station.longitude + 0.005}%2C{station.latitude + 0.003}&layer=mapnik&marker={station.latitude}%2C{station.longitude}"
-        ></iframe>
+        {#if showMap}
+          <iframe
+            title="Station location"
+            width="100%"
+            height="250"
+            frameborder="0"
+            loading="lazy"
+            referrerpolicy="no-referrer"
+            style="border-radius: 8px; border: 1px solid #30363d;"
+            src="https://www.openstreetmap.org/export/embed.html?bbox={station.longitude - 0.005}%2C{station.latitude - 0.003}%2C{station.longitude + 0.005}%2C{station.latitude + 0.003}&layer=mapnik&marker={station.latitude}%2C{station.longitude}"
+          ></iframe>
+        {:else}
+          <!-- Privacy: nothing is requested from openstreetmap.org until the user clicks. -->
+          <button class="map-placeholder" on:click={() => (showMap = true)}>
+            🗺️ Show map<span>loads openstreetmap.org</span>
+          </button>
+        {/if}
         <a
           class="route-btn"
           href="https://www.google.com/maps/dir/?api=1&destination={station.latitude},{station.longitude}"
@@ -139,6 +152,26 @@
 </div>
 
 <style>
+  .map-placeholder {
+    width: 100%;
+    height: 120px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.25rem;
+    background: #0f1419;
+    border: 1px dashed #30363d;
+    border-radius: 8px;
+    color: #c9d1d9;
+    cursor: pointer;
+  }
+
+  .map-placeholder span {
+    color: #6e7681;
+    font-size: 0.72rem;
+  }
+
   .detail-overlay {
     position: fixed;
     top: 0;

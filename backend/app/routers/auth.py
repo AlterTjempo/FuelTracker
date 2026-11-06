@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from datetime import datetime, timedelta, timezone
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -17,6 +17,9 @@ from limiter import limiter
 router = APIRouter()
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Verified against when the user does not exist, so "unknown user" and "wrong password"
+# take the same time (no account enumeration through response timing).
+_DUMMY_HASH = pwd_context.hash("timing-equaliser")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
 
 
@@ -113,12 +116,6 @@ def _user_from_token(token: str | None, db: Session) -> User | None:
     if changed is not None and payload.get("iat", 0) < int(changed.timestamp()):
         return None  # issued before the last password change
     return user
-
-
-def get_current_user(
-    token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
-) -> User | None:
-    return _user_from_token(token, db)
 
 
 def require_current_user(
@@ -252,7 +249,10 @@ async def login(request: Request, body: LoginRequest, db: Session = Depends(get_
         .filter((User.email == ident.lower()) | (User.username == ident))
         .first()
     )
-    if not user or not verify_password(body.password, user.hashed_password):
+    if not user:
+        verify_password(body.password, _DUMMY_HASH)
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    if not verify_password(body.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     token = create_access_token(str(user.id))
