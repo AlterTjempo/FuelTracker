@@ -6,9 +6,54 @@
   let indicator = null
   let loading = true
   
+  // One compact control: which stations count. "Near me" asks the browser for
+  // the location once and sends it with the request; it is never stored.
+  const scopes = [
+    { value: 'all', label: 'All stations' },
+    { value: '5', label: 'Within 5 km' },
+    { value: '10', label: 'Within 10 km' },
+    { value: '25', label: 'Within 25 km' },
+  ]
+  let scope = readScope()
+  let coords = null
+  let scopeNote = ''
+
+  function readScope() {
+    try { return localStorage.getItem('fuel_go_scope') || 'all' } catch { return 'all' }
+  }
+
+  function getPosition() {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) return reject(new Error('unsupported'))
+      navigator.geolocation.getCurrentPosition(
+        (p) => resolve({ lat: p.coords.latitude, lon: p.coords.longitude }),
+        reject,
+        { timeout: 8000, maximumAge: 600000 }
+      )
+    })
+  }
+
+  async function onScopeChange() {
+    try { localStorage.setItem('fuel_go_scope', scope) } catch { /* ignore */ }
+    await fetchIndicator()
+  }
+
   async function fetchIndicator() {
     try {
-      indicator = await safeFetch(`${API_BASE}/prices/analytics/go-now?fuel_type=${encodeURIComponent(fuelType)}`)
+      const params = new URLSearchParams({ fuel_type: fuelType })
+      scopeNote = ''
+      if (scope !== 'all') {
+        try {
+          coords = coords || await getPosition()
+          params.set('lat', coords.lat)
+          params.set('lon', coords.lon)
+          params.set('max_distance_km', scope)
+        } catch {
+          scope = 'all'
+          scopeNote = 'Location not available, showing all stations.'
+        }
+      }
+      indicator = await safeFetch(`${API_BASE}/prices/analytics/go-now?${params}`)
       loading = false
     } catch (error) {
       console.error('Error fetching indicator:', error)
@@ -87,7 +132,11 @@
       <div class="header">
         <span class="icon">{getIcon(indicator.recommendation)}</span>
         <h3>Should I refuel now?</h3>
+        <select class="scope" bind:value={scope} on:change={onScopeChange} aria-label="Which stations count">
+          {#each scopes as o}<option value={o.value}>{o.label}</option>{/each}
+        </select>
       </div>
+      {#if scopeNote}<div class="scope-note">{scopeNote}</div>{/if}
       
       <div class="recommendation" style="color: {getColor(indicator.recommendation)}">
         {getMessage(indicator.recommendation)}
@@ -146,13 +195,35 @@
       <div class="header">
         <span class="icon">⏳</span>
         <h3>Should I refuel now?</h3>
+        <select class="scope" bind:value={scope} on:change={onScopeChange} aria-label="Which stations count">
+          {#each scopes as o}<option value={o.value}>{o.label}</option>{/each}
+        </select>
       </div>
-      <p class="no-data">Not enough data yet. Check back after more price data is collected!</p>
+      <p class="no-data">
+        {#if scope !== 'all'}No current prices from stations in this range. Try a wider range.{:else}Not enough data yet. Check back after more price data is collected!{/if}
+      </p>
     </div>
   {/if}
 </div>
 
 <style>
+  .scope {
+    margin-left: auto;
+    background: #0f1419;
+    border: 1px solid #30363d;
+    color: #8b949e;
+    border-radius: 6px;
+    padding: 0.25rem 0.5rem;
+    font-size: 0.78rem;
+    min-height: 2rem;
+  }
+
+  .scope-note {
+    color: #8b949e;
+    font-size: 0.75rem;
+    margin: -0.5rem 0 0.75rem;
+  }
+
   .where {
     display: block;
     color: #8b949e;
