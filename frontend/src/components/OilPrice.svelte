@@ -1,10 +1,8 @@
 <script>
   import { onMount, onDestroy } from 'svelte'
-  import { Chart, registerables } from 'chart.js'
+  import { Chart } from '../lib/chartSetup.js'
   import { format } from 'date-fns'
   import API_BASE, { safeFetch } from '../lib/api.js'
-
-  Chart.register(...registerables)
 
   export let hours = 24
 

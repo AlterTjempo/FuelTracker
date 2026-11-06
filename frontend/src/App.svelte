@@ -10,6 +10,8 @@
   import PriceHeatmap from './components/PriceHeatmap.svelte'
   import UserMenu from './components/UserMenu.svelte'
   import Favorites from './components/Favorites.svelte'
+  import Outlook from './components/Outlook.svelte'
+  import Savings from './components/Savings.svelte'
   import { currentUser } from './lib/auth.js'
   import { getMe, trackPageView } from './lib/api.js'
   
@@ -26,6 +28,13 @@
     return Math.floor(diffMs / (1000 * 60 * 60))
   }
   
+  const fuelOptions = [
+    { value: 'e5', label: 'E5' },
+    { value: 'e10', label: 'E10' },
+    { value: 'diesel', label: 'Diesel' },
+    { value: 'oil', label: 'Oil' },
+  ]
+
   const timeRanges = [
     { label: '24h', hours: 24 },
     { label: '3d', hours: 72 },
@@ -55,6 +64,8 @@
     refreshCurrentUser()
   })
 
+  $: if (!$currentUser && activeTab === 'savings') activeTab = 'overview'
+
   $: if (activeTab && activeTab !== lastTrackedPage) {
     lastTrackedPage = activeTab
     trackPageView(activeTab, window.location.pathname, document.referrer)
@@ -75,59 +86,56 @@
   <div class="container">
     <div class="controls">
       <div class="fuel-selector">
-        <label>Fuel Type:</label>
-        <button 
-          class:active={selectedFuelType === 'e5'} 
-          on:click={() => selectedFuelType = 'e5'}
-        >
-          E5
-        </button>
-        <button 
-          class:active={selectedFuelType === 'e10'} 
-          on:click={() => selectedFuelType = 'e10'}
-        >
-          E10
-        </button>
-        <button 
-          class:active={selectedFuelType === 'diesel'} 
-          on:click={() => selectedFuelType = 'diesel'}
-        >
-          Diesel
-        </button>
-        <button 
-          class:active={selectedFuelType === 'oil'} 
-          on:click={() => selectedFuelType = 'oil'}
-        >
-          Oil
-        </button>
+        <label for="fuel-seg">Fuel</label>
+        <div class="seg" id="fuel-seg" role="group" aria-label="Fuel type">
+          {#each fuelOptions as opt}
+            <button
+              class:active={selectedFuelType === opt.value}
+              aria-pressed={selectedFuelType === opt.value}
+              on:click={() => selectedFuelType = opt.value}
+            >
+              {opt.label}
+            </button>
+          {/each}
+        </div>
       </div>
 
-      <div class="time-selector">
-        <label>Time Range:</label>
-        {#each timeRanges as range}
-          <button 
-            class:active={selectedHours === range.hours} 
-            on:click={() => selectedHours = range.hours}
-          >
-            {range.label}
-          </button>
-        {/each}
-      </div>
+      {#if activeTab === 'overview' || activeTab === 'statistics'}
+        <div class="time-selector">
+          <label for="period-seg">Period</label>
+          <div class="seg" id="period-seg" role="group" aria-label="Time range">
+            {#each timeRanges as range}
+              <button
+                class:active={selectedHours === range.hours}
+                aria-pressed={selectedHours === range.hours}
+                on:click={() => selectedHours = range.hours}
+              >
+                {range.label}
+              </button>
+            {/each}
+          </div>
+        </div>
+      {/if}
     </div>
 
-    <div class="tabs">
-      <button class:active={activeTab === 'overview'} on:click={() => activeTab = 'overview'}>
-        📊 Overview
+    <div class="tabs" role="tablist">
+      <button role="tab" aria-selected={activeTab === 'overview'} class:active={activeTab === 'overview'} on:click={() => activeTab = 'overview'}>
+        <span class="tab-icon">📊</span><span>Overview</span>
       </button>
-      <button class:active={activeTab === 'statistics'} on:click={() => activeTab = 'statistics'}>
-        📈 Statistics
+      <button role="tab" aria-selected={activeTab === 'statistics'} class:active={activeTab === 'statistics'} on:click={() => activeTab = 'statistics'}>
+        <span class="tab-icon">📈</span><span>Statistics</span>
       </button>
-      <button class:active={activeTab === 'leaderboard'} on:click={() => activeTab = 'leaderboard'}>
-        🏆 Literboard
+      <button role="tab" aria-selected={activeTab === 'outlook'} class:active={activeTab === 'outlook'} on:click={() => activeTab = 'outlook'}>
+        <span class="tab-icon">🔮</span><span>Outlook</span>
       </button>
-      <button class:active={activeTab === 'stations'} on:click={() => activeTab = 'stations'}>
-        ⛽ All Stations
+      <button role="tab" aria-selected={activeTab === 'stations'} class:active={activeTab === 'stations'} on:click={() => activeTab = 'stations'}>
+        <span class="tab-icon">⛽</span><span>Stations</span>
       </button>
+      {#if $currentUser}
+        <button role="tab" aria-selected={activeTab === 'savings'} class:active={activeTab === 'savings'} on:click={() => activeTab = 'savings'}>
+          <span class="tab-icon">💰</span><span>Savings</span>
+        </button>
+      {/if}
     </div>
 
     {#if activeTab === 'overview'}
@@ -172,18 +180,23 @@
         <div class="card">
           <PriceHeatmap fuelType={selectedFuelType} />
         </div>
-      {/if}
-    {:else if activeTab === 'leaderboard'}
-      {#if selectedFuelType === 'oil'}
         <div class="card">
-          <div class="oil-notice">🏆 The Literboard is not available for crude oil <br> Switch to E5, E10, or Diesel to see station statistics.</div>
-        </div>
-      {:else}
-        <div class="card">
-          <h2>🏆 Top Stations Leaderboard</h2>
+          <h2>🏆 Literboard · Top Stations</h2>
           <Statistics fuelType={selectedFuelType} hours={selectedHours} leaderboardOnly={true} />
         </div>
       {/if}
+    {:else if activeTab === 'outlook'}
+      {#if selectedFuelType === 'oil'}
+        <div class="card">
+          <div class="oil-notice">🔮 The weekly outlook is based on pump prices. <br> Switch to E5, E10, or Diesel to see it. Oil context is shown inside the outlook.</div>
+        </div>
+      {:else}
+        <Outlook fuelType={selectedFuelType} />
+      {/if}
+    {:else if activeTab === 'savings' && $currentUser}
+      <div class="card">
+        <Savings selectedFuelType={selectedFuelType} />
+      </div>
     {:else if activeTab === 'stations'}
       {#if selectedFuelType === 'oil'}
         <div class="card">
@@ -251,16 +264,49 @@
 
   .controls {
     display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-    margin-bottom: 1rem;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 1.25rem;
+    margin-bottom: 0.75rem;
   }
 
+  /* Segmented controls: grouped, quiet, with a clearly tinted selected state */
   .fuel-selector, .time-selector {
     display: flex;
-    gap: 0.375rem;
+    gap: 0.5rem;
     align-items: center;
-    flex-wrap: wrap;
+  }
+
+  .fuel-selector button, .time-selector button {
+    padding: 0.3rem 0.65rem;
+    min-height: 2rem;
+    font-size: 0.8rem;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: #8b949e;
+  }
+
+  .fuel-selector button:hover, .time-selector button:hover {
+    background: #21262d;
+    border-color: transparent;
+    color: #c9d1d9;
+  }
+
+  .fuel-selector button.active, .time-selector button.active {
+    background: rgba(59, 130, 246, 0.16);
+    border-color: #3b82f6;
+    color: #79b8ff;
+  }
+
+  .seg {
+    display: inline-flex;
+    gap: 2px;
+    padding: 3px;
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 8px;
   }
 
   .tabs {
@@ -269,13 +315,10 @@
     margin-bottom: 1rem;
     border-bottom: 2px solid #30363d;
     padding-bottom: 0;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
-  }
-
-  .tabs::-webkit-scrollbar {
-    display: none;
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    background: #0f1419;
   }
 
   .tabs button {
@@ -283,15 +326,40 @@
     border: none;
     border-bottom: 2px solid transparent;
     color: #8b949e;
-    padding: 0.625rem 0.875rem;
+    padding: 0.5rem 0.25rem;
     border-radius: 0;
     cursor: pointer;
     font-weight: 500;
-    font-size: 0.875rem;
     transition: all 0.2s;
     margin-bottom: -2px;
     white-space: nowrap;
-    flex-shrink: 0;
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.125rem;
+    font-size: 0.7rem;
+  }
+
+  .tab-icon {
+    font-size: 1.1rem;
+    line-height: 1;
+  }
+
+  :global(button:focus-visible),
+  :global(a:focus-visible),
+  :global(input:focus-visible),
+  :global(select:focus-visible) {
+    outline: 2px solid #58a6ff;
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    :global(*) {
+      transition: none !important;
+      animation: none !important;
+    }
   }
 
   .tabs button:hover {
@@ -308,9 +376,11 @@
 
   label {
     font-weight: 600;
-    color: #8b949e;
+    color: #6e7681;
     margin-right: 0.25rem;
-    font-size: 0.85rem;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
     white-space: nowrap;
   }
 
@@ -403,22 +473,31 @@
     }
 
     .controls {
-      flex-direction: row;
-      gap: 1.5rem;
-      margin-bottom: 1.5rem;
+      gap: 0.5rem 1.5rem;
+      margin-bottom: 1rem;
     }
 
     .fuel-selector, .time-selector {
       gap: 0.5rem;
     }
 
+    .fuel-selector button, .time-selector button {
+      padding: 0.3rem 0.85rem;
+    }
+
     .tabs button {
-      padding: 0.75rem 1.25rem;
+      padding: 0.75rem 1rem;
       font-size: 0.95rem;
+      flex-direction: row;
+      justify-content: center;
+      gap: 0.5rem;
+    }
+
+    .tab-icon {
+      font-size: 1rem;
     }
 
     label {
-      font-size: 0.9rem;
       margin-right: 0.5rem;
     }
 
@@ -462,12 +541,12 @@
     }
 
     .controls {
-      gap: 2rem;
-      margin-bottom: 2rem;
+      gap: 0.5rem 2rem;
+      margin-bottom: 1.25rem;
     }
 
     .tabs button {
-      padding: 0.75rem 1.5rem;
+      padding: 0.75rem 1.25rem;
       font-size: 1rem;
     }
 

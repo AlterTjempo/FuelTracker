@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte'
+  import { poll } from '../lib/poll.js'
   import API_BASE, { safeFetch } from '../lib/api.js'
   
   export let fuelType = 'e5'
@@ -46,7 +47,7 @@
   
   onMount(() => {
     fetchStats()
-    const interval = setInterval(fetchStats, 60000)
+    const interval = poll(fetchStats, 60000)
     return () => clearInterval(interval)
   })
   
@@ -54,22 +55,26 @@
     fetchStats()
   }
   
-  function getVolatilityLabel(volatility) {
-    if (volatility < 0.01) return 'Very Stable'
-    if (volatility < 0.02) return 'Stable'
-    if (volatility < 0.03) return 'Moderate'
-    if (volatility < 0.05) return 'Volatile'
-    return 'Very Volatile'
+  // Stability compares a station's typical daily price swing with the other
+  // stations (computed by the backend), so the label is no longer "very volatile"
+  // for everyone because of the shared midday price jump.
+  const STABILITY = {
+    very_stable: { label: 'Very stable', color: '#10b981' },
+    stable: { label: 'Stable', color: '#22c55e' },
+    typical: { label: 'Typical', color: '#6b7280' },
+    volatile: { label: 'Volatile', color: '#f59e0b' },
+    very_volatile: { label: 'Very volatile', color: '#f97316' },
   }
-  
-  function getVolatilityColor(volatility) {
-    if (volatility < 0.01) return '#10b981'
-    if (volatility < 0.02) return '#22c55e'
-    if (volatility < 0.03) return '#f59e0b'
-    if (volatility < 0.05) return '#f97316'
-    return '#ef4444'
+
+  function stabilityInfo(station) {
+    return STABILITY[station.stability] || { label: 'Not enough data', color: '#6e7681' }
   }
-  
+
+  // Bar length: 50% = same swing as the typical station, capped at 100%.
+  function swingBar(station) {
+    return station.swing_vs_market ? Math.min(station.swing_vs_market * 50, 100) : 0
+  }
+
   // Create formatter once to avoid recreating on every formatDate call
   const dateFormatter = new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Europe/Berlin',
@@ -204,13 +209,17 @@
                 </div>
                 <div class="station-stat volatility">
                   <span class="label">Stability:</span>
-                  <span class="value" style="color: {getVolatilityColor(station.volatility)}">
-                    {getVolatilityLabel(station.volatility)}
+                  <span
+                    class="value"
+                    style="color: {stabilityInfo(station).color}"
+                    title="Average daily price swing over 30 days compared with the typical station"
+                  >
+                    {stabilityInfo(station).label}{#if station.daily_swing_cents !== null}{' · ' + station.daily_swing_cents + '¢ daily swing'}{/if}
                   </span>
                 </div>
               </div>
               <div class="volatility-bar">
-                <div class="volatility-fill" style="width: {Math.min(station.volatility * 1000, 100)}%; background-color: {getVolatilityColor(station.volatility)}"></div>
+                <div class="volatility-fill" style="width: {swingBar(station)}%; background-color: {stabilityInfo(station).color}"></div>
               </div>
             </div>
           {/each}
@@ -468,6 +477,10 @@
     font-weight: 600;
   }
   
+  .station-stat.volatility .value {
+    margin-left: 0.4rem;
+  }
+
   .volatility-bar {
     grid-column: 1 / -1;
     height: 3px;

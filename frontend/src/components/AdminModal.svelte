@@ -3,11 +3,25 @@
   import L from 'leaflet';
   import 'leaflet/dist/leaflet.css';
   import { getAdminTrafficSummary } from '../lib/api.js';
+  import AdminSystem from './AdminSystem.svelte';
+  import AdminUsers from './AdminUsers.svelte';
 
   const dispatch = createEventDispatcher();
 
   const dayOptions = [7, 30, 90];
   const worldView = [18, 8];
+
+  let tab = 'traffic';
+  const tabs = [
+    { id: 'traffic', label: 'Traffic' },
+    { id: 'system', label: 'System' },
+    { id: 'users', label: 'Users' },
+  ];
+  const subtitles = {
+    traffic: 'Estimated visitor locations and requested app pages.',
+    system: 'Data collection health, database and security settings.',
+    users: 'Accounts and usage. Read-only.',
+  };
 
   let days = 30;
   let loading = true;
@@ -104,7 +118,14 @@
     }
   }
 
-  $: if (!loading && !error && summary && mapElement) {
+  // The map lives inside the Traffic tab; drop it when leaving so it is rebuilt on return.
+  $: if (tab !== 'traffic' && map) {
+    map.remove();
+    map = null;
+    markerLayer = null;
+  }
+
+  $: if (tab === 'traffic' && !loading && !error && summary && mapElement) {
     tick().then(() => {
       ensureMap();
       renderMarkers();
@@ -134,20 +155,34 @@
 
     <div class="header-row">
       <div>
-        <h2>Admin Traffic</h2>
-        <p class="subtitle">Estimated visitor locations and requested app pages.</p>
+        <h2>Admin</h2>
+        <p class="subtitle">{subtitles[tab]}</p>
       </div>
 
-      <div class="range-picker">
-        {#each dayOptions as option}
-          <button class:active={days === option} on:click={() => { days = option; loadSummary(); }}>
-            {option}d
-          </button>
-        {/each}
-      </div>
+      {#if tab === 'traffic'}
+        <div class="range-picker">
+          {#each dayOptions as option}
+            <button class:active={days === option} on:click={() => { days = option; loadSummary(); }}>
+              {option}d
+            </button>
+          {/each}
+        </div>
+      {/if}
     </div>
 
-    {#if loading}
+    <div class="admin-tabs" role="tablist">
+      {#each tabs as t}
+        <button role="tab" aria-selected={tab === t.id} class:active={tab === t.id} on:click={() => (tab = t.id)}>
+          {t.label}
+        </button>
+      {/each}
+    </div>
+
+    {#if tab === 'system'}
+      <AdminSystem />
+    {:else if tab === 'users'}
+      <AdminUsers />
+    {:else if loading}
       <div class="state-card">Loading admin traffic...</div>
     {:else if error}
       <div class="state-card error">{error}</div>
@@ -298,6 +333,35 @@
     margin: 0.35rem 0 0;
     color: #8aa0b6;
     font-size: 0.9rem;
+  }
+
+  .admin-tabs {
+    display: flex;
+    gap: 0.25rem;
+    margin-bottom: 1.1rem;
+    border-bottom: 1px solid #273341;
+  }
+
+  .admin-tabs button {
+    min-height: auto;
+    padding: 0.55rem 1rem;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    color: #8aa0b6;
+    cursor: pointer;
+    font-weight: 500;
+    margin-bottom: -1px;
+  }
+
+  .admin-tabs button:hover {
+    color: #d7e5f3;
+  }
+
+  .admin-tabs button.active {
+    color: #79b8ff;
+    border-bottom-color: #4d8ed0;
   }
 
   .range-picker {

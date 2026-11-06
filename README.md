@@ -10,6 +10,10 @@ A hobby project to track fuel prices in your area. Gets data from the Tankerkoni
 - 🗺️ Interactive map showing gas stations with prices
 - ⏰ Updates every 15 minutes automatically.
 - 💾 Keeps all historical data for analysis
+- 🎯 "Should I refuel now?" indicator (percentile of the current price vs. the same time of day, plus short-term trend)
+- 🔮 Outlook: weekday/hour price pattern for the next 7 days, Brent trend and relevant energy news
+- 🔍 Chart smoothing toggle and drag-to-zoom (down to 15-minute data)
+- 💰 Savings meter for logged-in users (compared against the area average at the time of refuelling)
 
 ## Setup
 
@@ -55,7 +59,18 @@ docker-compose up --build
 - `GET /api/prices/lowest?fuel_type=diesel&hours=24` - Cheapest fuel
 - `GET /api/prices/station/{station_id}/history?hours=24` - Price history
 - `GET /api/prices/station/{station_id}/stats` - Price stats
-- `GET /api/prices/history/all?fuel_type=diesel&hours=24` - Average prices for charts
+- `GET /api/prices/history/all?fuel_type=diesel&hours=24` - Average prices for charts (optional `start`, `end`, `bucket_minutes=15|30|60` for zooming)
+- `GET /api/prices/analytics/go-now` - Refuel-now indicator
+- `GET /api/prices/analytics/{time-patterns,top-stations,heatmap,lowest-ever}` - Statistics (Europe/Berlin time)
+
+### Outlook
+- `GET /api/insights/forecast?fuel_type=e5` - Weekday/hour pattern for the next 7 days (needs ~3 weeks of data)
+- `GET /api/insights/market?fuel_type=e5` - Brent trend, oil→pump lag relationship, keyword-relevant news
+
+### Savings (login required)
+- `GET /api/savings` - Summary + recent refuels
+- `POST /api/savings` - Log a refuel (`fuel_type`, `liters`, `price_per_liter`, optional `fueled_at`, `station_id`)
+- `DELETE /api/savings/{id}` - Remove a refuel
 
 ## Data Collection
 
@@ -99,7 +114,6 @@ LIMIT 10;
 
 ## Next Steps
 
-- [ ] Frontend improvements
-- [ ] Better graphs and analytics
-- [ ] Mobile app maybe?
-- [ ] Simple machine learning (because everything needs AI...)
+- [ ] Advanced prediction combining oil, news and fuel history (needs more overlapping oil data)
+- [ ] Multiple Brent sources with a consensus value
+- [ ] Only store prices when they change

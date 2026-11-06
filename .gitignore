@@ -19,3 +19,6 @@ ENV/
 .DS_Store
 node_modules/
 /backend/app/cache
+
+# Local data exports
+/fuel_prices_*.sql

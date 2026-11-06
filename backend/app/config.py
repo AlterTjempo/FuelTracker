@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     ALLOWED_ORIGINS: str = "http://localhost:5173"
 
     # Enable /docs and /redoc endpoints (disable in production)
-    ENABLE_DOCS: bool = True
+    ENABLE_DOCS: bool = False
 
     # JWT Authentication
     JWT_SECRET_KEY: str = "overwritten-in-config-env-change-me"

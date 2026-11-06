@@ -54,6 +54,13 @@
     return messages[recommendation] || 'No data'
   }
 
+  function minutesAgo(iso) {
+    const m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000))
+    return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago`
+  }
+
+  $: priceAge = indicator?.price_timestamp ? minutesAgo(indicator.price_timestamp) : ''
+
   function getTrendIcon(direction) {
     const icons = { 'falling': '📉', 'rising': '📈', 'stable': '➡️' }
     return icons[direction] || '➡️'
@@ -89,6 +96,9 @@
       <div class="percentile-bar-section">
         <div class="percentile-label">
           Current best price: <strong>€{indicator.current_price}</strong>
+          {#if indicator.station_name}
+            <span class="where">at {indicator.station_name}{#if priceAge}{' · updated ' + priceAge}{/if}</span>
+          {/if}
         </div>
         <div class="percentile-track">
           <div class="percentile-fill" style="width: {indicator.percentile}%; background: {getColor(indicator.recommendation)}"></div>
@@ -143,6 +153,13 @@
 </div>
 
 <style>
+  .where {
+    display: block;
+    color: #8b949e;
+    font-size: 0.8rem;
+    margin-top: 0.125rem;
+  }
+
   .go-now-container {
     margin-bottom: 1rem;
   }
@@ -209,7 +226,7 @@
     background: #21262d;
     border-radius: 5px;
     overflow: visible;
-    margin-bottom: 0.25rem;
+    margin-bottom: 1.5rem; /* room for the absolutely-flowing Cheapest/Priciest labels */
   }
 
   .percentile-fill {

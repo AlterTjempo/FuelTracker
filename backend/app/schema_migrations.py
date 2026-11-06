@@ -5,6 +5,9 @@ def apply_schema_migrations(engine) -> None:
     statements = [
         "ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE",
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)",
+        "ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMP WITH TIME ZONE",
+        "ALTER TABLE IF EXISTS refuel_logs ADD COLUMN IF NOT EXISTS reference_source VARCHAR NOT NULL DEFAULT 'area'",
+        "ALTER TABLE IF EXISTS refuel_logs ADD COLUMN IF NOT EXISTS manual_reference_price DOUBLE PRECISION",
         """
         CREATE TABLE IF NOT EXISTS visitor_location_cache (
             id SERIAL PRIMARY KEY,
