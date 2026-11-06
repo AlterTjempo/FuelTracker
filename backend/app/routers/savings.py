@@ -123,14 +123,23 @@ def add_refuel(
     if fueled_at.tzinfo is None:
         fueled_at = fueled_at.replace(tzinfo=timezone.utc)
     if fueled_at > now + timedelta(minutes=5):
-        raise HTTPException(status_code=400, detail="Refuel time cannot be in the future")
+        raise HTTPException(
+            status_code=400, detail="Refuel time cannot be in the future"
+        )
     if fueled_at < now - timedelta(days=365 * 5):
-        raise HTTPException(status_code=400, detail="Refuel time is too far in the past")
+        raise HTTPException(
+            status_code=400, detail="Refuel time is too far in the past"
+        )
 
-    if body.station_id and not db.query(Station.id).filter(Station.id == body.station_id).first():
+    if (
+        body.station_id
+        and not db.query(Station.id).filter(Station.id == body.station_id).first()
+    ):
         raise HTTPException(status_code=400, detail="Unknown station")
 
-    count = db.query(func.count(RefuelLog.id)).filter(RefuelLog.user_id == user.id).scalar()
+    count = (
+        db.query(func.count(RefuelLog.id)).filter(RefuelLog.user_id == user.id).scalar()
+    )
     if count >= MAX_LOGS_PER_USER:
         raise HTTPException(status_code=400, detail="Refuel log limit reached")
 

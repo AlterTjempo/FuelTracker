@@ -24,6 +24,7 @@ def _local_ts():
     """FuelPrice.timestamp converted to Europe/Berlin wall-clock time."""
     return func.timezone(LOCAL_TZ_NAME, FuelPrice.timestamp)
 
+
 # Whitelist mapping for fuel type → ORM column.
 # Prevents SQL injection and unsafe getattr on arbitrary attributes.
 FUEL_COLUMNS = {
@@ -322,7 +323,9 @@ def get_all_prices_history(
     request: Request,
     fuel_type: str = Query("diesel", pattern="^(e5|e10|diesel)$"),
     hours: int = Query(24, ge=1, le=1000000),
-    start: Optional[datetime] = Query(None, description="Window start (overrides `hours`)"),
+    start: Optional[datetime] = Query(
+        None, description="Window start (overrides `hours`)"
+    ),
     end: Optional[datetime] = Query(None, description="Window end (default: now)"),
     bucket_minutes: int = Query(60, description="Bucket size: 15, 30 or 60 minutes"),
     db: Session = Depends(get_db),
@@ -334,7 +337,9 @@ def get_all_prices_history(
     i.e. the individual observations). Fine buckets are limited to 14 days.
     """
     if bucket_minutes not in (15, 30, 60):
-        raise HTTPException(status_code=400, detail="bucket_minutes must be 15, 30 or 60")
+        raise HTTPException(
+            status_code=400, detail="bucket_minutes must be 15, 30 or 60"
+        )
     fuel_column = _get_fuel_column(fuel_type)
 
     now = datetime.now(timezone.utc)

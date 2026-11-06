@@ -37,16 +37,24 @@ class DataCollector:
             except httpx.HTTPStatusError as e:
                 code = e.response.status_code
                 if code in (401, 403):
-                    print(f"Tankerkonig AUTH error (HTTP {code}): check TANKERKONIG_API_KEY")
+                    print(
+                        f"Tankerkonig AUTH error (HTTP {code}): check TANKERKONIG_API_KEY"
+                    )
                 elif code == 429:
-                    print("Tankerkonig rate limit hit (HTTP 429); will retry next cycle")
+                    print(
+                        "Tankerkonig rate limit hit (HTTP 429); will retry next cycle"
+                    )
                 elif code >= 500:
-                    print(f"Tankerkonig upstream outage (HTTP {code}); temporary, will retry")
+                    print(
+                        f"Tankerkonig upstream outage (HTTP {code}); temporary, will retry"
+                    )
                 else:
                     print(f"Tankerkonig HTTP error {code}")
                 return None
             except (httpx.TimeoutException, httpx.TransportError) as e:
-                print(f"Tankerkonig network error ({type(e).__name__}); temporary, will retry")
+                print(
+                    f"Tankerkonig network error ({type(e).__name__}); temporary, will retry"
+                )
                 return None
             except ValueError:
                 print("Tankerkonig returned invalid JSON; temporary, will retry")
@@ -54,7 +62,11 @@ class DataCollector:
 
             if isinstance(data, dict) and data.get("ok"):
                 return data
-            message = data.get("message", "Unknown error") if isinstance(data, dict) else "Unexpected response"
+            message = (
+                data.get("message", "Unknown error")
+                if isinstance(data, dict)
+                else "Unexpected response"
+            )
             if "apikey" in str(message).lower() or "api key" in str(message).lower():
                 print(f"Tankerkonig AUTH error: {message}")
             else:

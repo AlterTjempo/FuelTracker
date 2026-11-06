@@ -43,7 +43,11 @@ def ttl_cached(ttl_seconds: float):
         def wrapper(*args, **kwargs):
             key = (
                 fn.__name__,
-                tuple(sorted((k, v) for k, v in kwargs.items() if k not in ("request", "db"))),
+                tuple(
+                    sorted(
+                        (k, v) for k, v in kwargs.items() if k not in ("request", "db")
+                    )
+                ),
             )
             return cached(key, ttl_seconds, lambda: fn(*args, **kwargs))
 

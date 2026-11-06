@@ -24,7 +24,15 @@ router = APIRouter()
 
 TZ_NAME = "Europe/Berlin"
 TZ = ZoneInfo(TZ_NAME)
-WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+WEEKDAYS = [
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+]
 
 FUEL_COLUMNS = {"e5": FuelPrice.e5, "e10": FuelPrice.e10, "diesel": FuelPrice.diesel}
 
@@ -147,7 +155,9 @@ def _compute_forecast(db: Session, fuel_type: str):
 
     min_samples = min(len(dow_dev[w]) for w in range(7))
     result["samples_per_weekday"] = [len(dow_dev[w]) for w in range(7)]
-    result["confidence"] = "low" if min_samples < 5 else "medium" if min_samples < 9 else "high"
+    result["confidence"] = (
+        "low" if min_samples < 5 else "medium" if min_samples < 9 else "high"
+    )
 
     forecast = []
     for i in range(7):
@@ -157,7 +167,9 @@ def _compute_forecast(db: Session, fuel_type: str):
         offset = _mean(devs) * 100  # cents vs. weekly average
         se = _std(devs) / math.sqrt(len(devs)) * 100
         hours = {
-            h: _mean(v) for h, v in hour_dev[w].items() if len(v) >= MIN_SAMPLES_PER_WEEKDAY
+            h: _mean(v)
+            for h, v in hour_dev[w].items()
+            if len(v) >= MIN_SAMPLES_PER_WEEKDAY
         }
         best_hour = min(hours, key=hours.get) if hours else None
         worst_hour = max(hours, key=hours.get) if hours else None
@@ -170,11 +182,15 @@ def _compute_forecast(db: Session, fuel_type: str):
                 "samples": len(devs),
                 # Typical cents vs. the day's mean for every hour with enough samples
                 # (lets the UI pick the best *remaining* hour for today).
-                "hour_offsets_cents": {str(h): round(v * 100, 2) for h, v in sorted(hours.items())},
+                "hour_offsets_cents": {
+                    str(h): round(v * 100, 2) for h, v in sorted(hours.items())
+                },
                 "best_hour": best_hour,
                 "worst_hour": worst_hour,
                 "hour_spread_cents": (
-                    round((hours[worst_hour] - hours[best_hour]) * 100, 2) if hours else None
+                    round((hours[worst_hour] - hours[best_hour]) * 100, 2)
+                    if hours
+                    else None
                 ),
             }
         )
@@ -187,9 +203,9 @@ def _compute_forecast(db: Session, fuel_type: str):
         f["rank"] = rank
         margin = max(0.3, f["uncertainty_cents"])
         f["label"] = (
-            "cheaper" if f["offset_cents"] < -margin
-            else "pricier" if f["offset_cents"] > margin
-            else "average"
+            "cheaper"
+            if f["offset_cents"] < -margin
+            else "pricier" if f["offset_cents"] > margin else "average"
         )
 
     result["insufficient_data"] = False
@@ -205,19 +221,45 @@ def get_forecast(
     db: Session = Depends(get_db),
 ):
     """Weekday/hour price pattern for the coming 7 days (Europe/Berlin time)."""
-    return cached(("forecast", fuel_type), CACHE_SECONDS, lambda: _compute_forecast(db, fuel_type))
+    return cached(
+        ("forecast", fuel_type), CACHE_SECONDS, lambda: _compute_forecast(db, fuel_type)
+    )
 
 
 # --- Market context: oil + news -------------------------------------------
 
 # keyword -> weight. Matched on word boundaries in title + summary.
 NEWS_KEYWORDS = {
-    "opec": 3, "opec+": 3, "production cut": 3, "output cut": 3, "supply disruption": 3,
-    "strait of hormuz": 3, "hormuz": 3, "red sea": 2, "sanction": 2, "sanctions": 2,
-    "embargo": 2, "refinery outage": 3, "refinery": 1, "pipeline": 1, "tanker": 1,
-    "crude": 1, "brent": 2, "oil price": 2, "oil prices": 2, "inventory": 1,
-    "stockpile": 1, "russia": 1, "iran": 1, "saudi": 1, "libya": 1, "ceasefire": 1,
-    "attack": 1, "outage": 2, "shutdown": 1, "hurricane": 1,
+    "opec": 3,
+    "opec+": 3,
+    "production cut": 3,
+    "output cut": 3,
+    "supply disruption": 3,
+    "strait of hormuz": 3,
+    "hormuz": 3,
+    "red sea": 2,
+    "sanction": 2,
+    "sanctions": 2,
+    "embargo": 2,
+    "refinery outage": 3,
+    "refinery": 1,
+    "pipeline": 1,
+    "tanker": 1,
+    "crude": 1,
+    "brent": 2,
+    "oil price": 2,
+    "oil prices": 2,
+    "inventory": 1,
+    "stockpile": 1,
+    "russia": 1,
+    "iran": 1,
+    "saudi": 1,
+    "libya": 1,
+    "ceasefire": 1,
+    "attack": 1,
+    "outage": 2,
+    "shutdown": 1,
+    "hurricane": 1,
 }
 _KEYWORD_RES = [
     (kw, w, re.compile(r"(?<![a-z0-9])" + re.escape(kw) + r"(?![a-z0-9])", re.I))
@@ -253,7 +295,8 @@ def _compute_market(db: Session, fuel_type: str):
     today = now.astimezone(TZ).date()
 
     fuel_daily = {
-        d: _mean(list(h.values())) for d, h in _build_daily(_hourly_series(db, column, since)).items()
+        d: _mean(list(h.values()))
+        for d, h in _build_daily(_hourly_series(db, column, since)).items()
     }
     oil_daily = _daily_oil(db, since)
 
@@ -274,7 +317,9 @@ def _compute_market(db: Session, fuel_type: str):
                 ys.append(fc)
         r = _pearson(xs, ys)
         if r is not None:
-            lag_stats.append({"lag_days": lag, "correlation": round(r, 3), "pairs": len(xs)})
+            lag_stats.append(
+                {"lag_days": lag, "correlation": round(r, 3), "pairs": len(xs)}
+            )
 
     usable = [s for s in lag_stats if s["pairs"] >= 20]
     best = max(usable, key=lambda s: abs(s["correlation"])) if usable else None
@@ -366,4 +411,6 @@ def get_market_context(
     db: Session = Depends(get_db),
 ):
     """Brent trend, oil→pump lag relationship and keyword-relevant news."""
-    return cached(("market", fuel_type), CACHE_SECONDS, lambda: _compute_market(db, fuel_type))
+    return cached(
+        ("market", fuel_type), CACHE_SECONDS, lambda: _compute_market(db, fuel_type)
+    )
