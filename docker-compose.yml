@@ -10,7 +10,9 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
-      - "127.0.0.1:5432:5432"
+      # Reachable from this machine only by default. To use DBeaver/Kuma from elsewhere set
+      # DB_BIND in a .env file next to this file (see config.env.example), e.g. DB_BIND=0.0.0.0
+      - "${DB_BIND:-127.0.0.1}:5432:5432"
 
   backend:
     build: ./backend
@@ -23,7 +25,7 @@ services:
     environment:
       DATABASE_URL: postgresql://fuel:fuel@db:5432/fuelprices
     ports:
-      - "127.0.0.1:8000:8000"
+      - "${API_BIND:-127.0.0.1}:8000:8000"
     volumes:
       - ./backend/app:/app
 

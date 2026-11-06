@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 import asyncio
@@ -11,7 +11,7 @@ from slowapi.errors import RateLimitExceeded
 from limiter import limiter
 from schema_migrations import apply_schema_migrations
 
-from database import engine, Base
+from database import engine, Base, SessionLocal
 from routers import stations, prices
 from routers import oil_prices
 from routers import energy_news
@@ -185,6 +185,66 @@ async def private_responses_not_cached(request, call_next):
 @app.get("/")
 async def root():
     return {"message": "FuelTracker API", "status": "running"}
+
+
+@app.get("/api/health")
+def api_health():
+    """Uptime-monitor endpoint reachable through the website itself (nginx proxies /api).
+
+    Also checks the database, so a monitor notices when the API is up but cannot reach it.
+    """
+    from sqlalchemy import text
+
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("select 1"))
+    except Exception:
+        raise HTTPException(status_code=503, detail="database unavailable")
+    return {"status": "healthy", "database": "ok"}
+
+
+@app.get("/api/health/data")
+def api_health_data():
+    """Is fresh data still arriving? 200 if every collector is recent, 503 otherwise.
+
+    For an uptime monitor (e.g. Uptime Kuma): a collector that fails silently, such as the
+    news feed, turns this red instead of going unnoticed. Details are in the JSON body.
+    """
+    from datetime import datetime, timezone
+
+    from sqlalchemy import func
+
+    from models import EnergyNews, FuelPrice, MarketPrice, OilPrice
+    from services.admin_stats import age_seconds, freshness_status
+
+    now = datetime.now(timezone.utc)
+    # (label, latest timestamp query, ok within seconds, error after seconds)
+    checks = {
+        "fuel_prices": (FuelPrice.timestamp, 2 * 3600, 6 * 3600),
+        "oil_prices": (OilPrice.timestamp, 6 * 3600, 24 * 3600),
+        "market_prices": (MarketPrice.timestamp, 6 * 3600, 48 * 3600),
+        "energy_news": (EnergyNews.fetched_at, 12 * 3600, 48 * 3600),
+    }
+    db = SessionLocal()
+    try:
+        report = {}
+        for name, (column, ok_within, error_after) in checks.items():
+            latest = db.query(func.max(column)).scalar()
+            age = age_seconds(latest, now)
+            report[name] = {
+                "status": freshness_status(age, ok_within, error_after),
+                "age_minutes": None if age is None else round(age / 60),
+            }
+    except Exception:
+        raise HTTPException(status_code=503, detail="database unavailable")
+    finally:
+        db.close()
+    bad = [n for n, r in report.items() if r["status"] == "error"]
+    if bad:
+        raise HTTPException(
+            status_code=503, detail={"stale": bad, "collectors": report}
+        )
+    return {"status": "healthy", "collectors": report}
 
 
 @app.get("/health")
