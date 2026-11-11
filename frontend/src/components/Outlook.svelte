@@ -76,8 +76,12 @@
   // Reliability comes from the backend and is based on out-of-sample metrics
   // (skill vs. baseline, Diebold-Mariano test, band calibration).
   const TONES = { High: 'high', Medium: 'mid', Low: 'low' }
+  // When no model beats "unchanged", that is a finding, not a fault: show it neutrally
+  // ("No clear trend") instead of an amber "Reliability: Low" that reads like an error.
   $: reliability = headline?.reliability
-    ? { level: headline.reliability.level, tone: TONES[headline.reliability.level] || 'low', note: headline.reliability.why }
+    ? headline.beats_baseline
+      ? { level: headline.reliability.level, label: 'Reliability: ' + headline.reliability.level, tone: TONES[headline.reliability.level] || 'low', note: headline.reliability.why }
+      : { level: 'none', label: 'No clear trend', tone: 'flat', note: 'No model predicted prices better than "unchanged" on past data' }
     : null
 
   // One extra line only when the probability model passed validation (calibration + Brier skill).
@@ -182,14 +186,15 @@
         </div>
 
         <div class="hero-foot">
-          <span class="badge" data-tone={reliability.tone} title={reliability.note}>Reliability: {reliability.level}</span>
+          <span class="badge" data-tone={reliability.tone} title={reliability.note}>{reliability.label}</span>
           <span class="explain">
             {#if headline.beats_baseline}
               {reliability.note}.
               {#if headline.drivers?.length}Driven mainly by {headline.drivers.map((d) => d.feature).join(', ')}.{/if}
             {:else}
-              The model doesn't see a reliable upward or downward trend. Day-to-day moves are within
-              normal noise{#if baselineMae !== null}{' '}(about ±{baselineMae}¢/L per day){/if}.
+              Pump prices have been moving within normal day-to-day noise{#if baselineMae !== null}{' '}(about ±{baselineMae}¢/L per day){/if},
+              and no model has predicted them better than "unchanged". The page therefore does not
+              invent a trend. The reliable pattern is the time of day (see below).
             {/if}
             {#if probLine}<strong class="prob">{probLine}.</strong>{/if}
           </span>
@@ -462,6 +467,7 @@
   }
   .badge[data-tone='high'] { color: #10b981; border-color: rgba(16,185,129,0.5); }
   .badge[data-tone='mid'] { color: #58a6ff; border-color: rgba(88,166,255,0.5); }
+  .badge[data-tone='flat'] { color: #8b949e; border-color: #30363d; }
   .badge[data-tone='low'] { color: #f59e0b; border-color: rgba(245,158,11,0.45); }
   .prob { display: block; margin-top: 0.25rem; color: #e6edf3; }
   .explain { color: #c9d1d9; font-size: 0.88rem; line-height: 1.5; }

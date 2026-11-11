@@ -204,7 +204,7 @@ def api_health():
 
 
 @app.get("/api/health/data")
-def api_health_data():
+def api_health_data(strict: bool = False):
     """Is fresh data still arriving? 200 if every collector is recent, 503 otherwise.
 
     For an uptime monitor (e.g. Uptime Kuma): a collector that fails silently, such as the
@@ -240,11 +240,20 @@ def api_health_data():
     finally:
         db.close()
     bad = [n for n, r in report.items() if r["status"] == "error"]
+    # strict=true: also fail while a collector is only "warn" (late, but not yet an error)
+    if strict:
+        bad = [n for n, r in report.items() if r["status"] != "ok"]
     if bad:
         raise HTTPException(
             status_code=503, detail={"stale": bad, "collectors": report}
         )
-    return {"status": "healthy", "collectors": report}
+    ok_count = sum(1 for r in report.values() if r["status"] == "ok")
+    return {
+        "status": "healthy",
+        "ok_count": ok_count,  # lets a monitor assert ok_count == total (no collector even "warn")
+        "total": len(report),
+        "collectors": report,
+    }
 
 
 @app.get("/health")
