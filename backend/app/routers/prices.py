@@ -1,15 +1,32 @@
 from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_
+from sqlalchemy import func, and_, literal_column
 from typing import List, Optional
 from pydantic import BaseModel
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+import analytics_config as cfg
+from cache import ttl_cached
 from limiter import limiter
+from services import go_now, literboard
+from services.stats_utils import haversine_km
 
 from database import get_db
 from models import FuelPrice, Station
 
 router = APIRouter()
+
+# Time-of-day / day-of-week statistics are evaluated in German local time.
+LOCAL_TZ_NAME = "Europe/Berlin"
+LOCAL_TZ = ZoneInfo(LOCAL_TZ_NAME)
+# Max age of a station's latest price for it to count as a "current" price.
+CURRENT_PRICE_MAX_AGE = timedelta(minutes=30)
+
+
+def _local_ts():
+    """FuelPrice.timestamp converted to Europe/Berlin wall-clock time."""
+    return func.timezone(LOCAL_TZ_NAME, FuelPrice.timestamp)
+
 
 # Whitelist mapping for fuel type → ORM column.
 # Prevents SQL injection and unsafe getattr on arbitrary attributes.
@@ -18,6 +35,21 @@ FUEL_COLUMNS = {
     "e10": FuelPrice.e10,
     "diesel": FuelPrice.diesel,
 }
+
+
+def _stability_label(ratio):
+    """Label a station's daily price swing relative to the market median."""
+    if ratio is None:
+        return None
+    if ratio <= 0.75:
+        return "very_stable"
+    if ratio <= 0.92:
+        return "stable"
+    if ratio <= 1.08:
+        return "typical"
+    if ratio <= 1.25:
+        return "volatile"
+    return "very_volatile"
 
 
 def _get_fuel_column(fuel_type: str):
@@ -303,38 +335,79 @@ def get_station_stats(
 
 
 @router.get("/history/all")
-@limiter.limit("60/minute")
+@limiter.limit("120/minute")
+@ttl_cached(120)
 def get_all_prices_history(
     request: Request,
     fuel_type: str = Query("diesel", pattern="^(e5|e10|diesel)$"),
     hours: int = Query(24, ge=1, le=1000000),
+    start: Optional[datetime] = Query(
+        None, description="Window start (overrides `hours`)"
+    ),
+    end: Optional[datetime] = Query(None, description="Window end (default: now)"),
+    bucket_minutes: int = Query(60, description="Bucket size: 15, 30 or 60 minutes"),
     db: Session = Depends(get_db),
 ):
-    """Get average price history across all stations for graphing"""
-    since = datetime.now(timezone.utc) - timedelta(hours=hours)
+    """Average price history across all stations for graphing.
+
+    Default is hourly buckets over the last `hours`. For zooming, pass
+    `start`/`end` and a finer `bucket_minutes` (15 = the collection interval,
+    i.e. the individual observations). Fine buckets are limited to 14 days.
+    """
+    if bucket_minutes not in (15, 30, 60):
+        raise HTTPException(
+            status_code=400, detail="bucket_minutes must be 15, 30 or 60"
+        )
     fuel_column = _get_fuel_column(fuel_type)
 
-    # Group by hourly intervals
+    now = datetime.now(timezone.utc)
+    if start is not None:
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+        since = start
+        until = end if end is not None else now
+        if until.tzinfo is None:
+            until = until.replace(tzinfo=timezone.utc)
+        if until <= since:
+            raise HTTPException(status_code=400, detail="end must be after start")
+        if bucket_minutes < 60 and (until - since) > timedelta(days=14):
+            raise HTTPException(
+                status_code=400, detail="Fine-grained buckets are limited to 14 days"
+            )
+    else:
+        since = now - timedelta(hours=hours)
+        until = None
+
+    bucket = func.date_bin(
+        literal_column(f"interval '{int(bucket_minutes)} minutes'"),
+        FuelPrice.timestamp,
+        literal_column("TIMESTAMPTZ '2000-01-03 00:00:00+00'"),
+    )
+
+    filters = [FuelPrice.timestamp >= since, fuel_column.isnot(None)]
+    if until is not None:
+        filters.append(FuelPrice.timestamp <= until)
+
     results = (
         db.query(
-            func.date_trunc("hour", FuelPrice.timestamp).label("hour"),
+            bucket.label("hour"),
             func.avg(fuel_column).label("avg_price"),
             func.min(fuel_column).label("min_price"),
             func.max(fuel_column).label("max_price"),
             func.count(FuelPrice.id).label("sample_count"),
         )
-        .filter(FuelPrice.timestamp >= since, fuel_column.isnot(None))
-        .group_by("hour")
-        .order_by("hour")
+        .filter(*filters)
+        .group_by(bucket)
+        .order_by(bucket)
         .all()
     )
 
     return [
         {
             "timestamp": r.hour,
-            "avg_price": float(r.avg_price) if r.avg_price else None,
-            "min_price": float(r.min_price) if r.min_price else None,
-            "max_price": float(r.max_price) if r.max_price else None,
+            "avg_price": float(r.avg_price) if r.avg_price is not None else None,
+            "min_price": float(r.min_price) if r.min_price is not None else None,
+            "max_price": float(r.max_price) if r.max_price is not None else None,
             "sample_count": r.sample_count,
         }
         for r in results
@@ -343,6 +416,7 @@ def get_all_prices_history(
 
 @router.get("/analytics/time-patterns")
 @limiter.limit("30/minute")
+@ttl_cached(300)
 def get_time_patterns(
     request: Request,
     fuel_type: str = Query("e5", pattern="^(e5|e10|diesel)$"),
@@ -355,7 +429,7 @@ def get_time_patterns(
 
     # Check if we have enough data (at least 7 unique days for day patterns)
     unique_days = (
-        db.query(func.count(func.distinct(func.date(FuelPrice.timestamp))))
+        db.query(func.count(func.distinct(func.date(_local_ts()))))
         .filter(FuelPrice.timestamp >= since, fuel_column.isnot(None))
         .scalar()
         or 0
@@ -376,7 +450,7 @@ def get_time_patterns(
     # Cheapest by day of week (0=Monday, 6=Sunday)
     day_results = (
         db.query(
-            func.extract("dow", FuelPrice.timestamp).label("day_of_week"),
+            func.extract("isodow", _local_ts()).label("day_of_week"),
             func.avg(fuel_column).label("avg_price"),
         )
         .filter(FuelPrice.timestamp >= since, fuel_column.isnot(None))
@@ -388,7 +462,7 @@ def get_time_patterns(
     # Cheapest by hour of day
     hour_results = (
         db.query(
-            func.extract("hour", FuelPrice.timestamp).label("hour_of_day"),
+            func.extract("hour", _local_ts()).label("hour_of_day"),
             func.avg(fuel_column).label("avg_price"),
         )
         .filter(FuelPrice.timestamp >= since, fuel_column.isnot(None))
@@ -411,7 +485,7 @@ def get_time_patterns(
         "insufficient_data": False,
         "days_collected": unique_days,
         "cheapest_day": {
-            "day": days[int(day_results[0].day_of_week)] if day_results else None,
+            "day": days[int(day_results[0].day_of_week) - 1] if day_results else None,
             "avg_price": float(day_results[0].avg_price) if day_results else None,
         },
         "cheapest_hour": {
@@ -419,7 +493,7 @@ def get_time_patterns(
             "avg_price": float(hour_results[0].avg_price) if hour_results else None,
         },
         "by_day": [
-            {"day": days[int(r.day_of_week)], "avg_price": float(r.avg_price)}
+            {"day": days[int(r.day_of_week) - 1], "avg_price": float(r.avg_price)}
             for r in day_results
         ],
         "by_hour": [
@@ -434,35 +508,56 @@ def get_time_patterns(
 def get_go_now_indicator(
     request: Request,
     fuel_type: str = Query("e5", pattern="^(e5|e10|diesel)$"),
+    lat: Optional[float] = Query(None, ge=-90, le=90),
+    lon: Optional[float] = Query(None, ge=-180, le=180),
+    max_distance_km: Optional[float] = Query(
+        None, gt=0, le=cfg.GO_NOW_MAX_DISTANCE_KM_LIMIT
+    ),
+    station_id: Optional[str] = Query(None, max_length=64),
     db: Session = Depends(get_db),
 ):
-    """Smart refuel indicator using same-hour-of-day percentile + trend.
+    """Refuel-now indicator: same-hour percentile + trend (see docs/prediction-models.md).
 
-    Two signals combined:
-    1. Same-hour percentile: compare the current price against the SAME
-       hour of day (±1h) over the past 7 days. This means a 7am price is
-       only ranked against other ~7am prices, not cheap evening prices.
-    2. Trend: linear regression over the last 3 hours of hourly minimums
-       to detect whether prices are currently falling or rising.
-
-    Matrix:
-      cheap + falling  => excellent - Great price, still dropping
-      cheap + rising   => good      - Good price, grab it before it rises
-      mid   + falling  => neutral   - OK price, might improve
-      mid   + rising   => wait      - Average but getting worse
-      expensive + fall => wait      - Wait, price is coming down
-      expensive + rise => avoid     - Expensive and climbing
+    Optional filters restrict which stations count: either a single
+    `station_id`, or all stations within `max_distance_km` of (`lat`, `lon`).
+    Without filters every tracked station counts (the default).
+    The decision logic lives in services/go_now.py and is backtested by
+    services/go_now_backtest.py.
     """
     fuel_column = _get_fuel_column(fuel_type)
     now = datetime.now(timezone.utc)
 
-    # --- Current best price (lowest among all stations, last hour) ---
-    one_hour_ago = now - timedelta(hours=1)
-    current_min = (
-        db.query(func.min(fuel_column))
-        .filter(FuelPrice.timestamp >= one_hour_ago, fuel_column.isnot(None))
-        .scalar()
-    )
+    # --- which stations count? ---
+    allowed_ids = None
+    applied = {"type": "all"}
+    if station_id:
+        station = db.query(Station).filter(Station.id == station_id).first()
+        if station is None:
+            raise HTTPException(status_code=404, detail="Station not found")
+        allowed_ids = [station.id]
+        applied = {
+            "type": "station",
+            "station_id": station.id,
+            "station_name": station.name,
+        }
+    elif lat is not None or lon is not None or max_distance_km is not None:
+        if lat is None or lon is None or max_distance_km is None:
+            raise HTTPException(
+                status_code=400,
+                detail="lat, lon and max_distance_km must be given together",
+            )
+        allowed_ids = [
+            sid
+            for sid, slat, slon in db.query(
+                Station.id, Station.latitude, Station.longitude
+            )
+            if haversine_km(lat, lon, slat, slon) <= max_distance_km
+        ]
+        applied = {
+            "type": "radius",
+            "max_distance_km": max_distance_km,
+            "stations_in_range": len(allowed_ids),
+        }
 
     insufficient = {
         "current_price": None,
@@ -473,186 +568,165 @@ def get_go_now_indicator(
         "week_high": None,
         "week_median": None,
         "recommendation": "insufficient_data",
+        "station_id": None,
+        "station_name": None,
+        "price_timestamp": None,
+        "filter": applied,
     }
-
-    if current_min is None:
+    if allowed_ids is not None and not allowed_ids:
         return insufficient
 
-    current_price = float(current_min)
-    current_hour = now.hour
-
-    # --- Same-hour-of-day percentile (±1 hour window, past 7 days) ---
-    # Compare current price only against historical prices from the same
-    # time-of-day window, so morning prices compete with mornings only.
-    seven_days_ago = now - timedelta(days=7)
-    hour_low = (current_hour - 1) % 24
-    hour_high = (current_hour + 1) % 24
-
-    # Build hour filter using ORM (safe — no raw SQL interpolation)
-    hour_expr = func.extract("hour", FuelPrice.timestamp)
-    if hour_low < hour_high:
-        hour_condition = and_(hour_expr >= hour_low, hour_expr <= hour_high)
-    else:
-        # Wraps around midnight, e.g. 23, 0, 1
-        hour_condition = (hour_expr >= hour_low) | (hour_expr <= hour_high)
-
-    # Same-hour ORM query
-    hour_bucket = func.date_trunc("hour", FuelPrice.timestamp).label("hour_bucket")
-    same_hour_rows = (
-        db.query(
-            hour_bucket,
-            func.min(fuel_column).label("min_price"),
+    def restrict(query):
+        return (
+            query
+            if allowed_ids is None
+            else query.filter(FuelPrice.station_id.in_(allowed_ids))
         )
+
+    # --- current best price: each station's latest row, fresh and open ---
+    fresh_since = now - timedelta(minutes=cfg.GO_NOW_FRESH_MINUTES)
+    latest_ts = (
+        restrict(
+            db.query(
+                FuelPrice.station_id.label("station_id"),
+                func.max(FuelPrice.timestamp).label("max_ts"),
+            )
+        )
+        .group_by(FuelPrice.station_id)
+        .subquery()
+    )
+    best = (
+        db.query(fuel_column, Station.id, Station.name, FuelPrice.timestamp)
+        .join(
+            latest_ts,
+            and_(
+                FuelPrice.station_id == latest_ts.c.station_id,
+                FuelPrice.timestamp == latest_ts.c.max_ts,
+            ),
+        )
+        .join(Station, Station.id == FuelPrice.station_id)
         .filter(
-            FuelPrice.timestamp >= seven_days_ago,
+            FuelPrice.timestamp >= fresh_since,
+            Station.is_open.is_(True),
             fuel_column.isnot(None),
-            hour_condition,
+        )
+        .order_by(fuel_column.asc())
+        .first()
+    )
+    if best is None:
+        return insufficient
+    current_price = float(best[0])
+
+    # --- hourly lows over the shape window (covers the 7-day percentile window too) ---
+    hour_bucket = func.date_trunc("hour", FuelPrice.timestamp)
+    rows = (
+        restrict(db.query(hour_bucket, func.min(fuel_column)))
+        .filter(
+            FuelPrice.timestamp >= now - timedelta(days=cfg.GO_NOW_SHAPE_DAYS + 1),
+            fuel_column.isnot(None),
         )
         .group_by(hour_bucket)
-        .order_by(func.min(fuel_column))
         .all()
     )
+    lows = {k: float(v) for k, v in rows}
 
-    rows = same_hour_rows
-    if len(rows) < 6:
-        # Need at least 6 same-hour data points (~2 days worth)
-        # Fall back to all-hours percentile
-        fallback_rows = (
-            db.query(
-                hour_bucket,
-                func.min(fuel_column).label("min_price"),
-            )
-            .filter(
-                FuelPrice.timestamp >= seven_days_ago,
-                fuel_column.isnot(None),
-            )
-            .group_by(hour_bucket)
-            .order_by(func.min(fuel_column))
-            .all()
-        )
-        rows = fallback_rows
-
-        if len(rows) < 12:
-            insufficient["current_price"] = round(current_price, 3)
-            return insufficient
-
-    prices = [float(r.min_price) for r in rows]
-    total = len(prices)
-
-    below_or_equal = sum(1 for p in prices if p <= current_price)
-    percentile = round((below_or_equal / total) * 100, 1)
-
-    week_low = min(prices)
-    week_high = max(prices)
-    sorted_prices = sorted(prices)
-    mid = total // 2
-    week_median = (
-        sorted_prices[mid]
-        if total % 2 == 1
-        else (sorted_prices[mid - 1] + sorted_prices[mid]) / 2
-    )
-
-    # --- Trend: linear regression over last 3 hours ---
-    # Get hourly min prices for the last 3 hours to compute slope.
-    three_hours_ago = now - timedelta(hours=3)
-    trend_bucket = func.date_trunc("hour", FuelPrice.timestamp).label("hour_bucket")
-    trend_rows = (
-        db.query(
-            trend_bucket,
-            func.min(fuel_column).label("min_price"),
-        )
-        .filter(
-            FuelPrice.timestamp >= three_hours_ago,
-            fuel_column.isnot(None),
-        )
-        .group_by(trend_bucket)
-        .order_by(trend_bucket)
-        .all()
-    )
-
-    # Calculate trend using simple linear regression (cents per hour)
-    trend_cents_per_hour = 0.0
-    trend_direction = "stable"
-    if len(trend_rows) >= 2:
-        n = len(trend_rows)
-        # x = 0, 1, 2, ... (hour index), y = price
-        trend_prices = [float(r.min_price) for r in trend_rows]
-        x_mean = (n - 1) / 2.0
-        y_mean = sum(trend_prices) / n
-
-        numerator = sum((i - x_mean) * (p - y_mean) for i, p in enumerate(trend_prices))
-        denominator = sum((i - x_mean) ** 2 for i in range(n))
-
-        if denominator > 0:
-            slope = numerator / denominator  # euros per hour
-            trend_cents_per_hour = round(slope * 100, 2)  # convert to cents
-
-            # Threshold: ±0.1 cent/hour to avoid noise
-            if trend_cents_per_hour < -0.1:
-                trend_direction = "falling"
-            elif trend_cents_per_hour > 0.1:
-                trend_direction = "rising"
-            else:
-                trend_direction = "stable"
-
-    # --- Combined recommendation ---
-    # Percentile buckets: cheap (<35), mid (35-65), expensive (>65)
-    # Trend: falling, stable, rising
-    if percentile <= 35:
-        # Cheap
-        if trend_direction == "falling":
-            recommendation = "excellent"  # Great price, still dropping
-        elif trend_direction == "stable":
-            recommendation = "good"  # Good price, stable
-        else:
-            recommendation = "good"  # Good price, grab it before it rises
-    elif percentile <= 65:
-        # Mid-range
-        if trend_direction == "falling":
-            recommendation = "neutral"  # OK price, might improve
-        elif trend_direction == "stable":
-            recommendation = "neutral"  # Average price
-        else:
-            recommendation = "wait"  # Average but getting worse
-    else:
-        # Expensive
-        if trend_direction == "falling":
-            recommendation = "wait"  # Wait, price is coming down
-        elif trend_direction == "stable":
-            recommendation = "wait"  # Expensive, wait for drop
-        else:
-            recommendation = "avoid"  # Expensive and climbing
+    decision = go_now.decide(lows, now, current_price)
+    if decision is None:
+        insufficient["current_price"] = round(current_price, 3)
+        return insufficient
 
     return {
         "current_price": round(current_price, 3),
-        "percentile": percentile,
-        "trend": trend_cents_per_hour,
-        "trend_direction": trend_direction,
-        "week_low": round(week_low, 3),
-        "week_high": round(week_high, 3),
-        "week_median": round(week_median, 3),
-        "recommendation": recommendation,
+        "percentile": decision.percentile,
+        "trend": (
+            round(decision.slope_c_per_h, 2)
+            if decision.slope_c_per_h is not None
+            else 0.0
+        ),
+        "trend_direction": decision.trend_direction,
+        "week_low": round(decision.week_low, 3),
+        "week_high": round(decision.week_high, 3),
+        "week_median": round(decision.week_median, 3),
+        "recommendation": decision.recommendation,
+        "station_id": best[1],
+        "station_name": best[2],
+        "price_timestamp": best[3],
+        "hours_to_jump": (
+            round(decision.hours_to_jump, 1)
+            if decision.hours_to_jump is not None
+            else None
+        ),
+        "filter": applied,
     }
 
 
 @router.get("/analytics/top-stations")
 @limiter.limit("30/minute")
+@ttl_cached(900)  # prices change every 15 minutes; this is the heaviest aggregate
 def get_top_stations(
     request: Request,
     fuel_type: str = Query("e5", pattern="^(e5|e10|diesel)$"),
     hours: int = Query(168, ge=24, le=1000000),
     limit: int = Query(3, ge=1, le=10),
+    opening_hours_weighted: bool = Query(
+        False,
+        description="Relate 'cheapest X% of the time' to the hours the station had data (was open)",
+    ),
     db: Session = Depends(get_db),
 ):
-    """Get top stations by average price and consistency"""
-    since = datetime.now(timezone.utc) - timedelta(hours=hours)
-    # Volatility is always measured over a fixed 30-day window so that the
-    # stability label is a station characteristic, not an artefact of the
-    # currently selected time range.
-    volatility_since = datetime.now(timezone.utc) - timedelta(days=30)
-    fuel_column = _get_fuel_column(fuel_type)
+    """Top stations by average price, with the data volume behind every figure.
 
-    # Get station statistics (ranking window = user-selected hours)
+    Stations with too little data in the window are returned unranked at the
+    end (`ranked: false`, `enough_data: false`) instead of being ranked next to
+    well-covered stations. See docs/prediction-models.md.
+    """
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(hours=hours)
+    # Stability uses a fixed window (analytics_config.LITERBOARD_STABILITY_DAYS) so that the
+    # label is a station characteristic, not an artefact of the selected time range.
+    stability_since = now - timedelta(days=cfg.LITERBOARD_STABILITY_DAYS)
+    fuel_column = _get_fuel_column(fuel_type)
+    local_day = func.date(_local_ts())
+
+    # Ranking window statistics for every station (all stations: eligibility needs the full picture)
+    hour_bucket = func.date_trunc("hour", FuelPrice.timestamp).label("hour_bucket")
+    # One aggregation over the window, reused for hours-with-data, the cheapest share and the
+    # number of hours in the window (previously three separate scans of the whole table).
+    per_station_hour = (
+        db.query(
+            hour_bucket,
+            FuelPrice.station_id.label("station_id"),
+            func.min(fuel_column).label("min_price"),
+        )
+        .filter(FuelPrice.timestamp >= since, fuel_column.isnot(None))
+        .group_by(hour_bucket, FuelPrice.station_id)
+        .cte("per_station_hour")
+    )
+    ranked_cte = db.query(
+        per_station_hour.c.station_id,
+        func.rank()
+        .over(
+            partition_by=per_station_hour.c.hour_bucket,
+            order_by=per_station_hour.c.min_price,
+        )
+        .label("rnk"),
+        func.dense_rank()
+        .over(order_by=per_station_hour.c.hour_bucket)
+        .label("hour_no"),
+    ).cte("ranked")
+    coverage_rows = (
+        db.query(
+            ranked_cte.c.station_id,
+            func.count().label("hours"),
+            func.count().filter(ranked_cte.c.rnk == 1).label("cheapest"),
+            func.max(ranked_cte.c.hour_no).label("window_hours"),
+        )
+        .group_by(ranked_cte.c.station_id)
+        .all()
+    )
+    hours_by_station = {r.station_id: r.hours for r in coverage_rows}
+    cheapest_counts = {r.station_id: r.cheapest for r in coverage_rows}
+    total_hours = max((r.window_hours for r in coverage_rows), default=0)
     station_stats = (
         db.query(
             FuelPrice.station_id,
@@ -663,74 +737,52 @@ def get_top_stations(
             func.min(fuel_column).label("min_price"),
             func.max(fuel_column).label("max_price"),
             func.count(FuelPrice.id).label("data_points"),
+            func.count(func.distinct(local_day)).label("days_with_data"),
         )
         .join(Station, FuelPrice.station_id == Station.id)
         .filter(FuelPrice.timestamp >= since, fuel_column.isnot(None))
         .group_by(FuelPrice.station_id, Station.name, Station.brand, Station.city)
-        .order_by(func.avg(fuel_column))
-        .limit(limit)
         .all()
     )
 
-    # Volatility subquery over fixed 30-day window
-    volatility_rows = (
+    # Stability = how big a station's typical daily price swing is compared with
+    # the other stations (see docs). Rows exist only while a station is open, so
+    # a day's range is always measured over its open hours.
+    daily = (
         db.query(
-            FuelPrice.station_id,
-            func.stddev(fuel_column).label("volatility"),
+            FuelPrice.station_id.label("station_id"),
+            (func.max(fuel_column) - func.min(fuel_column)).label("rng"),
+            func.count(FuelPrice.id).label("n"),
         )
-        .filter(FuelPrice.timestamp >= volatility_since, fuel_column.isnot(None))
-        .group_by(FuelPrice.station_id)
+        .filter(FuelPrice.timestamp >= stability_since, fuel_column.isnot(None))
+        .group_by(FuelPrice.station_id, local_day)
+        .subquery()
+    )
+    swing_rows = (
+        db.query(
+            daily.c.station_id,
+            func.avg(daily.c.rng).label("swing"),
+            func.count().label("days"),
+        )
+        .filter(daily.c.n >= cfg.LITERBOARD_MIN_ROWS_PER_DAY)
+        .group_by(daily.c.station_id)
         .all()
     )
-    volatility_map = {row.station_id: row.volatility for row in volatility_rows}
+    swing_map = {
+        r.station_id: (float(r.swing), r.days)
+        for r in swing_rows
+        if r.days >= cfg.LITERBOARD_MIN_STABILITY_DAYS
+    }
+    swing_values = sorted(v[0] for v in swing_map.values())
+    market_swing = swing_values[len(swing_values) // 2] if swing_values else None
 
-    # Calculate cheapest counts - simplified approach
-    # Get total number of hourly samples
-    total_samples = (
-        db.query(
-            func.count(func.distinct(func.date_trunc("hour", FuelPrice.timestamp)))
-        )
-        .filter(FuelPrice.timestamp >= since, fuel_column.isnot(None))
-        .scalar()
-        or 1
-    )
-
-    # For each station, approximate how often it was cheapest
-    # by comparing its minimum price to overall minimum
-    cheapest_counts = {}
-    overall_min = (
-        db.query(func.min(fuel_column))
-        .filter(FuelPrice.timestamp >= since, fuel_column.isnot(None))
-        .scalar()
-        or 0
-    )
-
+    rows = []
     for stat in station_stats:
-        # Simple heuristic: if station's min price is close to overall min,
-        # it was likely cheapest more often
-        if overall_min > 0:
-            price_diff = abs(stat.min_price - overall_min)
-            # Stations within 1 cent of absolute min are considered frequently cheapest
-            if price_diff < 0.01:
-                cheapest_counts[stat.station_id] = int(
-                    total_samples * 0.3
-                )  # Rough estimate
-            elif price_diff < 0.02:
-                cheapest_counts[stat.station_id] = int(total_samples * 0.15)
-            else:
-                cheapest_counts[stat.station_id] = 0
-        else:
-            cheapest_counts[stat.station_id] = 0
-
-    results = []
-    for stat in station_stats:
-        cheapest_count = cheapest_counts.get(stat.station_id, 0)
-        cheapest_percentage = (
-            (cheapest_count / total_samples) * 100 if total_samples > 0 else 0
-        )
-
-        volatility = volatility_map.get(stat.station_id) or 0
-        results.append(
+        swing_info = swing_map.get(stat.station_id)
+        swing = swing_info[0] if swing_info else None
+        ratio = swing / market_swing if swing is not None and market_swing else None
+        station_hours = hours_by_station.get(stat.station_id, 0)
+        rows.append(
             {
                 "station_id": stat.station_id,
                 "name": stat.name,
@@ -739,17 +791,42 @@ def get_top_stations(
                 "avg_price": round(float(stat.avg_price), 3),
                 "min_price": round(float(stat.min_price), 3),
                 "max_price": round(float(stat.max_price), 3),
-                "volatility": round(float(volatility), 4),
-                "cheapest_percentage": round(cheapest_percentage, 1),
+                "daily_swing_cents": (
+                    round(swing * 100, 1) if swing is not None else None
+                ),
+                "swing_vs_market": round(ratio, 2) if ratio is not None else None,
+                "stability": _stability_label(ratio),
+                "stability_days": swing_info[1] if swing_info else 0,
+                "stability_window_days": cfg.LITERBOARD_STABILITY_DAYS,
+                "cheapest_percentage": literboard.cheapest_percentage(
+                    cheapest_counts.get(stat.station_id, 0),
+                    total_hours,
+                    station_hours,
+                    opening_hours_weighted,
+                ),
                 "data_points": stat.data_points,
+                "hours_with_data": station_hours,
+                "days_with_data": stat.days_with_data,
+                "window_hours": total_hours,
+                "opening_hours_weighted": opening_hours_weighted,
             }
         )
 
-    return results
+    ranked, unranked = literboard.split_by_coverage(rows)
+    ranked.sort(key=lambda r: r["avg_price"])
+    unranked.sort(key=lambda r: r["avg_price"])
+    for i, r in enumerate(ranked[:limit], start=1):
+        r["ranked"], r["enough_data"], r["rank"] = True, True, i
+    out = ranked[:limit]
+    for r in unranked[: cfg.LITERBOARD_MAX_UNRANKED]:
+        r["ranked"], r["enough_data"], r["rank"] = False, False, None
+        out.append(r)
+    return out
 
 
 @router.get("/analytics/heatmap")
 @limiter.limit("30/minute")
+@ttl_cached(300)
 def get_price_heatmap(
     request: Request,
     fuel_type: str = Query("e5", pattern="^(e5|e10|diesel)$"),
@@ -769,8 +846,8 @@ def get_price_heatmap(
     # We remap to 0=Monday … 6=Sunday in Python.
     rows = (
         db.query(
-            func.extract("dow", FuelPrice.timestamp).label("dow_pg"),
-            func.extract("hour", FuelPrice.timestamp).label("hour_of_day"),
+            func.extract("dow", _local_ts()).label("dow_pg"),
+            func.extract("hour", _local_ts()).label("hour_of_day"),
             func.avg(fuel_column).label("avg_price"),
         )
         .filter(FuelPrice.timestamp >= since, fuel_column.isnot(None))
@@ -797,6 +874,7 @@ def get_price_heatmap(
 
 @router.get("/analytics/lowest-ever")
 @limiter.limit("30/minute")
+@ttl_cached(300)
 def get_lowest_price_ever(
     request: Request,
     fuel_type: str = Query("e5", pattern="^(e5|e10|diesel)$"),

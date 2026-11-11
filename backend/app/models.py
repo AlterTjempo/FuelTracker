@@ -1,16 +1,18 @@
 from sqlalchemy import (
+    Date,
     Column,
     Integer,
     String,
     Float,
     Boolean,
-    DateTime,
     ForeignKey,
     Index,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.types import TIMESTAMP
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from datetime import datetime, timezone
+import uuid
 
 from database import Base
 
@@ -99,3 +101,150 @@ class EnergyNews(Base):
     )
 
     __table_args__ = (Index("idx_energy_news_published_at", "published_at"),)
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    username = Column(String, unique=True, nullable=False, index=True)
+    email = Column(String, unique=True, nullable=False, index=True)
+    hashed_password = Column(String, nullable=False)
+    is_admin = Column(Boolean, nullable=False, default=False)
+    created_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    # Tokens issued before this moment are rejected (set on password change).
+    password_changed_at = Column(TIMESTAMP(timezone=True), nullable=True)
+
+    favorites = relationship(
+        "FavoriteStation", back_populates="user", cascade="all, delete-orphan"
+    )
+
+
+class FavoriteStation(Base):
+    __tablename__ = "favorite_stations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    station_id = Column(String, ForeignKey("stations.id"), nullable=False)
+    added_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    user = relationship("User", back_populates="favorites")
+    station = relationship("Station")
+
+    __table_args__ = (
+        Index("idx_favorite_user_station", "user_id", "station_id", unique=True),
+    )
+
+
+class RefuelLog(Base):
+    """A refuelling session logged by a user (basis of the savings meter)."""
+
+    __tablename__ = "refuel_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    station_id = Column(String, ForeignKey("stations.id"), nullable=True)
+    fuel_type = Column(String, nullable=False)  # e5 | e10 | diesel
+    liters = Column(Float, nullable=False)
+    price_per_liter = Column(Float, nullable=False)
+    fueled_at = Column(TIMESTAMP(timezone=True), nullable=False)
+    # What the user compares against: 'area' (tracked stations), 'nl' (CBS Dutch
+    # average) or 'manual' (their own reference price, stored below).
+    reference_source = Column(String, nullable=False, default="area")
+    manual_reference_price = Column(Float, nullable=True)
+    created_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    station = relationship("Station")
+
+    __table_args__ = (Index("idx_refuel_user_time", "user_id", "fueled_at"),)
+
+
+class MarketPrice(Base):
+    """Refined products, Brent (USD) and EUR/USD (see analytics_config.MARKET_SERIES)."""
+
+    __tablename__ = "market_prices"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    timestamp = Column(TIMESTAMP(timezone=True), nullable=False)
+    series = Column(
+        String, nullable=False
+    )  # e.g. gasoil_proxy, rbob, eurusd, brent_usd
+    source = Column(String, nullable=False)  # e.g. yahoo:HO=F or yahoo:HO=F:daily
+    value = Column(Float, nullable=False)
+
+    __table_args__ = (
+        Index("idx_market_series_time", "series", "timestamp", unique=True),
+    )
+
+
+class NlFuelPrice(Base):
+    """Dutch national average pump prices (CBS open data), one row per day."""
+
+    __tablename__ = "nl_fuel_prices"
+
+    day = Column(Date, primary_key=True)
+    euro95 = Column(Float, nullable=True)  # EUR/L, Dutch equivalent of E10
+    diesel = Column(Float, nullable=True)  # EUR/L
+
+
+class VisitorLocationCache(Base):
+    __tablename__ = "visitor_location_cache"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ip_hash = Column(String, unique=True, nullable=False, index=True)
+    country = Column(String, nullable=True)
+    region = Column(String, nullable=True)
+    city = Column(String, nullable=True)
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+    resolved_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (Index("idx_location_cache_coordinates", "latitude", "longitude"),)
+
+
+class TrafficEvent(Base):
+    __tablename__ = "traffic_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    page = Column(String, nullable=False, index=True)
+    path = Column(String, nullable=False)
+    source = Column(String, nullable=False, default="direct", index=True)
+    country = Column(String, nullable=True)
+    region = Column(String, nullable=True)
+    city = Column(String, nullable=True)
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+    visited_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        Index("idx_traffic_event_visited_at", "visited_at"),
+        Index("idx_traffic_event_page_source", "page", "source"),
+    )

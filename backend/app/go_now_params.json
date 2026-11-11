@@ -1,0 +1,7 @@
+{
+  "cheap_pct": 25,
+  "expensive_pct": 75,
+  "trend_threshold_c_per_h": 0.2,
+  "trend_method": "legacy",
+  "jump_aware": true
+}

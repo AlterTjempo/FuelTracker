@@ -31,27 +31,47 @@ class DataCollector:
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             try:
-                print(f"Requesting URL: {url} with params: {params}")
                 response = await client.get(url, params=params)
-                print(f"Response status: {response.status_code}")
                 response.raise_for_status()
                 data = response.json()
-                print(
-                    f"Response data keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}"
-                )
-
-                if data.get("ok"):
-                    return data
+            except httpx.HTTPStatusError as e:
+                code = e.response.status_code
+                if code in (401, 403):
+                    print(
+                        f"Tankerkonig AUTH error (HTTP {code}): check TANKERKONIG_API_KEY"
+                    )
+                elif code == 429:
+                    print(
+                        "Tankerkonig rate limit hit (HTTP 429); will retry next cycle"
+                    )
+                elif code >= 500:
+                    print(
+                        f"Tankerkonig upstream outage (HTTP {code}); temporary, will retry"
+                    )
                 else:
-                    print(f"API Error: {data.get('message', 'Unknown error')}")
-                    return None
-
-            except Exception as e:
-                print(f"Error fetching stations: {type(e).__name__}: {str(e)}")
-                import traceback
-
-                traceback.print_exc()
+                    print(f"Tankerkonig HTTP error {code}")
                 return None
+            except (httpx.TimeoutException, httpx.TransportError) as e:
+                print(
+                    f"Tankerkonig network error ({type(e).__name__}); temporary, will retry"
+                )
+                return None
+            except ValueError:
+                print("Tankerkonig returned invalid JSON; temporary, will retry")
+                return None
+
+            if isinstance(data, dict) and data.get("ok"):
+                return data
+            message = (
+                data.get("message", "Unknown error")
+                if isinstance(data, dict)
+                else "Unexpected response"
+            )
+            if "apikey" in str(message).lower() or "api key" in str(message).lower():
+                print(f"Tankerkonig AUTH error: {message}")
+            else:
+                print(f"Tankerkonig API error: {message}")
+            return None
 
     async def fetch_prices_for_stations(
         self, station_ids: List[str]
@@ -80,8 +100,31 @@ class DataCollector:
                     else:
                         print(f"API Error: {data.get('message', 'Unknown error')}")
 
+                except httpx.HTTPStatusError as e:
+                    # Never print the exception itself: it contains the URL with the API key.
+                    code = e.response.status_code
+                    kind = (
+                        "auth error, check TANKERKONIG_API_KEY"
+                        if code in (401, 403)
+                        else (
+                            "rate limited"
+                            if code == 429
+                            else (
+                                "upstream outage, temporary"
+                                if code >= 500
+                                else "HTTP error"
+                            )
+                        )
+                    )
+                    print(f"Tankerkonig prices request failed (HTTP {code}, {kind})")
+                    continue
+                except (httpx.TimeoutException, httpx.TransportError) as e:
+                    print(
+                        f"Tankerkonig prices network error ({type(e).__name__}); temporary"
+                    )
+                    continue
                 except Exception as e:
-                    print(f"Error fetching prices: {e}")
+                    print(f"Unexpected error fetching prices: {type(e).__name__}")
                     continue
 
         return {"ok": True, "prices": all_prices} if all_prices else None
@@ -157,9 +200,7 @@ class DataCollector:
     async def fetch_and_store_prices(self):
         """Main function to fetch and store fuel prices"""
         print(f"[{datetime.now(timezone.utc)}] Starting data collection...")
-        print(
-            f"Config - API Key: {'***' + self.api_key[-4:] if self.api_key else 'MISSING'}"
-        )
+        print(f"Config - API Key: {'set' if self.api_key else 'MISSING'}")
         print(
             f"Config - Lat: {settings.LATITUDE}, Lng: {settings.LONGITUDE}, Range: {settings.RANGE}"
         )

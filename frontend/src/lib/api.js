@@ -19,4 +19,161 @@ export async function safeFetch(url, options = {}) {
   return response.json();
 }
 
+// --- Auth helpers ---
+
+export function getToken() {
+  return localStorage.getItem('fuel_token');
+}
+
+export function setToken(token) {
+  localStorage.setItem('fuel_token', token);
+}
+
+export function clearToken() {
+  localStorage.removeItem('fuel_token');
+  localStorage.removeItem('fuel_user');
+}
+
+export function getStoredUser() {
+  const raw = localStorage.getItem('fuel_user');
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch { return null; }
+}
+
+export function setStoredUser(user) {
+  localStorage.setItem('fuel_user', JSON.stringify(user));
+}
+
+function authHeaders() {
+  const token = getToken();
+  if (!token) return {};
+  return { Authorization: `Bearer ${token}` };
+}
+
+export async function register(username, email, password, captchaToken) {
+  return safeFetch(`${API_BASE}/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, email, password, captcha_token: captchaToken }),
+  });
+}
+
+export async function login(identifier, password) {
+  return safeFetch(`${API_BASE}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ identifier, password }),
+  });
+}
+
+export async function getMe() {
+  return safeFetch(`${API_BASE}/auth/me`, {
+    headers: authHeaders(),
+  });
+}
+
+export async function trackPageView(page, path = '/', referrer = '') {
+  try {
+    await fetch(`${API_BASE}/analytics/page-view`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ page, path, referrer }),
+      keepalive: true,
+    });
+  } catch {
+    // Ignore analytics failures so page navigation never breaks.
+  }
+}
+
+export async function updateProfile({ username, email }) {
+  return safeFetch(`${API_BASE}/auth/me/update`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ username, email }),
+  });
+}
+
+export async function changePassword(currentPassword, newPassword) {
+  const result = await safeFetch(`${API_BASE}/auth/me/password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  });
+  // The server revokes all older tokens on a password change and returns a fresh one.
+  if (result?.access_token) setToken(result.access_token);
+  return result;
+}
+
+export async function getAdminTrafficSummary(days = 30) {
+  return safeFetch(`${API_BASE}/admin/traffic-summary?days=${days}`, {
+    headers: authHeaders(),
+  });
+}
+
+export async function getAdminSystem() {
+  return safeFetch(`${API_BASE}/admin/system`, { headers: authHeaders() });
+}
+
+export async function getAdminUsers() {
+  return safeFetch(`${API_BASE}/admin/users`, { headers: authHeaders() });
+}
+
+// --- Favorites ---
+
+export async function getFavorites() {
+  return safeFetch(`${API_BASE}/favorites/`, {
+    headers: authHeaders(),
+  });
+}
+
+export async function addFavorite(stationId) {
+  return safeFetch(`${API_BASE}/favorites/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ station_id: stationId }),
+  });
+}
+
+export async function removeFavorite(stationId) {
+  return safeFetch(`${API_BASE}/favorites/${stationId}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  });
+}
+
+// --- Outlook (forecast + market context) ---
+
+export function getForecast(fuelType) {
+  return safeFetch(`${API_BASE}/insights/forecast?fuel_type=${encodeURIComponent(fuelType)}`);
+}
+
+export function getTrend(fuelType) {
+  return safeFetch(`${API_BASE}/insights/trend?fuel_type=${encodeURIComponent(fuelType)}`);
+}
+
+export function getMarketContext(fuelType) {
+  return safeFetch(`${API_BASE}/insights/market?fuel_type=${encodeURIComponent(fuelType)}`);
+}
+
+// --- Savings ---
+
+export function getSavings() {
+  return safeFetch(`${API_BASE}/savings`, { headers: authHeaders() });
+}
+
+export function addRefuel(entry) {
+  return safeFetch(`${API_BASE}/savings`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(entry),
+  });
+}
+
+export function deleteRefuel(id) {
+  return safeFetch(`${API_BASE}/savings/${id}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  });
+}
+
 export default API_BASE;
