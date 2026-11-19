@@ -145,6 +145,17 @@ HOURLY_SHAPE_DAYS = 28  # default: history for the hour-of-day shape
 HOURLY_SHAPE_HALF_LIFE_DAYS = 14  # default: recency weighting of the shape
 HOURLY_MIN_SHAPE_DAYS = 7  # default: days needed to estimate the shape
 
+# Next-12-hours forecast (services/intraday_forecast.py)
+INTRADAY_HORIZON_HOURS = 12  # requested: how far ahead, hour by hour
+INTRADAY_ANCHOR_HOURS = 3  # default: latest hours that set today's price level
+INTRADAY_SHAPE_HALF_LIFE_DAYS = 3  # backtest (dev data, Nov 2026): 3 d beat 7 d and 14 d at every hour ahead; the rhythm drifts quickly
+INTRADAY_MAX_DATA_AGE_HOURS = 3  # default: no forecast if the latest hour is older
+INTRADAY_BACKTEST_DAYS = 60  # default: walk-forward test window (origins every hour)
+INTRADAY_MIN_ORIGINS = 48  # default: test origins needed in each half of the backtest
+INTRADAY_BAND = (0.1, 0.9)  # default: error quantiles of the "how sure" band (80%)
+INTRADAY_HIGH_MAE_CENTS = 1.0  # default: typical error for "High" certainty
+INTRADAY_MEDIUM_MAE_CENTS = 2.0  # default: typical error for "Medium" certainty
+
 # ------------------------------------------------- Best time / brand pattern ----
 BRAND_MIN_STATIONS = (
     3  # configurable (requested): brands with fewer stations -> "other"

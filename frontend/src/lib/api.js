@@ -151,6 +151,10 @@ export function getTrend(fuelType) {
   return safeFetch(`${API_BASE}/insights/trend?fuel_type=${encodeURIComponent(fuelType)}`);
 }
 
+export function getIntraday(fuelType) {
+  return safeFetch(`${API_BASE}/insights/intraday?fuel_type=${encodeURIComponent(fuelType)}`);
+}
+
 export function getMarketContext(fuelType) {
   return safeFetch(`${API_BASE}/insights/market?fuel_type=${encodeURIComponent(fuelType)}`);
 }

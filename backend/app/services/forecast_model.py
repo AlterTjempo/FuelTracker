@@ -658,8 +658,14 @@ def probability_forecast(
 # --- hourly forecast -----------------------------------------------------------
 
 
-def _hour_shape_at(days: dict, upto: date, weekend: Optional[bool] = None):
+def _hour_shape_at(
+    days: dict,
+    upto: date,
+    weekend: Optional[bool] = None,
+    half_life: Optional[float] = None,
+):
     """Recency-weighted mean deviation of each hour from its day's mean, days <= upto."""
+    half_life = half_life or cfg.HOURLY_SHAPE_HALF_LIFE_DAYS
     num, den = defaultdict(float), defaultdict(float)
     n_days = 0
     for d, hrs in days.items():
@@ -668,7 +674,7 @@ def _hour_shape_at(days: dict, upto: date, weekend: Optional[bool] = None):
             continue
         if weekend is not None and (d.weekday() >= 5) != weekend:
             continue
-        w = 0.5 ** (age / cfg.HOURLY_SHAPE_HALF_LIFE_DAYS)
+        w = 0.5 ** (age / half_life)
         m = mean(hrs.values())
         n_days += 1
         for h, v in hrs.items():

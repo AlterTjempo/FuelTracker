@@ -3,6 +3,7 @@
   import { getForecast, getMarketContext, getTrend } from '../lib/api.js'
   import TrendChart from './TrendChart.svelte'
   import PriceHeatmap from './PriceHeatmap.svelte'
+  import IntradayForecast from './IntradayForecast.svelte'
 
   export let fuelType = 'e5'
 
@@ -140,6 +141,8 @@
 </script>
 
 <div class="outlook">
+  <IntradayForecast {fuelType} />
+
   {#if loading && !trend}
     <div class="panel state">Loading outlook…</div>
   {:else if error && !trend}

@@ -80,6 +80,16 @@ async def lifespan(app: FastAPI):
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=20),
     )
 
+    # Regenerate the next-12-hours forecast every 15 minutes, a few minutes after
+    # the price collector, so it always starts from the newest hour.
+    scheduler.add_job(
+        insights.warm_intraday_cache,
+        "interval",
+        minutes=15,
+        id="intraday_forecast",
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=3),
+    )
+
     # Start scheduler
     scheduler.start()
 

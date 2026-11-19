@@ -23,6 +23,7 @@ from limiter import limiter
 from services.brand_pattern import analyse as analyse_brands
 from services.brand_pattern import group_brands
 from services.forecast_model import build_trend_forecast
+from services.intraday_forecast import build_intraday_forecast
 from models import EnergyNews, FuelPrice, MarketPrice, OilPrice, Station
 
 router = APIRouter()
@@ -88,17 +89,21 @@ def _hourly_series(db: Session, column, since: datetime):
     return [(r[0], float(r[1]), int(r[2])) for r in rows]
 
 
-def _build_daily(hourly):
-    """Group well-covered hours by local date. Returns {date: {hour: price}}."""
+def _covered_hours(hourly):
+    """{local hour: price} for hours with normal coverage (partial hours dropped)."""
     if not hourly:
         return {}
     counts = sorted(n for _, _, n in hourly)
     median_n = counts[len(counts) // 2]
     min_n = max(3, median_n * 0.4)  # drop hours with clearly partial coverage
+    return {h: price for h, price, n in hourly if n >= min_n}
+
+
+def _build_daily(hourly):
+    """Group well-covered hours by local date. Returns {date: {hour: price}}."""
     days = defaultdict(dict)
-    for h, price, n in hourly:
-        if n >= min_n:
-            days[h.date()][h.hour] = price
+    for h, price in _covered_hours(hourly).items():
+        days[h.date()][h.hour] = price
     return {d: hrs for d, hrs in days.items() if len(hrs) >= MIN_HOURS_PER_DAY}
 
 
@@ -589,6 +594,69 @@ def get_trend_forecast(
     return cached(
         ("trend", fuel_type), TREND_CACHE_SECONDS, lambda: _compute_trend(db, fuel_type)
     )
+
+
+INTRADAY_CACHE_SECONDS = 1200
+
+
+def _localize(obj):
+    """Give the model's naive Berlin-local datetimes an explicit UTC offset."""
+    if isinstance(obj, datetime):
+        return obj.replace(tzinfo=TZ).isoformat()
+    if isinstance(obj, dict):
+        return {k: _localize(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_localize(v) for v in obj]
+    return obj
+
+
+def _compute_intraday(db: Session, fuel_type: str):
+    now = datetime.now(timezone.utc)
+    days_needed = cfg.INTRADAY_BACKTEST_DAYS + cfg.HOURLY_SHAPE_DAYS + 2
+    hourly = _hourly_series(
+        db, FUEL_COLUMNS[fuel_type], now - timedelta(days=days_needed)
+    )
+    result = build_intraday_forecast(
+        _covered_hours(hourly), now.astimezone(TZ).replace(tzinfo=None)
+    )
+    result["fuel_type"] = fuel_type
+    result["generated_at"] = now.isoformat()
+    result["disclaimer"] = (
+        "Statistical estimate of the area-average price for the next hours, "
+        "tested on past data. Not a guarantee."
+    )
+    return _localize(result)
+
+
+@router.get("/intraday")
+@limiter.limit("20/minute")
+def get_intraday_forecast(
+    request: Request,
+    fuel_type: str = Query("e5", pattern="^(e5|e10|diesel)$"),
+    db: Session = Depends(get_db),
+):
+    """Area-average price for the next 12 hours, hour by hour, with a backtested band."""
+    return cached(
+        ("intraday", fuel_type),
+        INTRADAY_CACHE_SECONDS,
+        lambda: _compute_intraday(db, fuel_type),
+    )
+
+
+def warm_intraday_cache() -> None:
+    """Scheduled job: regenerate the 12-hour forecasts after new prices arrive."""
+    for fuel_type in FUEL_COLUMNS:
+        db = SessionLocal()
+        try:
+            refresh(
+                ("intraday", fuel_type),
+                INTRADAY_CACHE_SECONDS,
+                lambda: _compute_intraday(db, fuel_type),
+            )
+        except Exception as exc:  # never let a failed run break the scheduler
+            print(f"[intraday forecast] {fuel_type}: {type(exc).__name__}")
+        finally:
+            db.close()
 
 
 def warm_trend_cache() -> None:

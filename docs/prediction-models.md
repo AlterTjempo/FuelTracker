@@ -48,6 +48,7 @@ Code: [`routers/insights.py`](../backend/app/routers/insights.py), [`services/fo
 
 | Section | Question | Endpoint |
 |---|---|---|
+| Next 12 hours | What will the average price do hour by hour today? | `GET /api/insights/intraday` |
 | Price trend | Will the average price be higher or lower in the next days? | `GET /api/insights/trend` |
 | Best time to refuel | Which hour is cheapest? | `GET /api/insights/forecast` |
 | Market context | What are Brent and the news doing? | `GET /api/insights/market` |
@@ -129,6 +130,32 @@ A variant is selected if Brier skill ≥ 3% and Diebold-Mariano p < 0.1 on the s
 **Refusals.** "Not enough data" if the latest complete day is more than 3 days old or fewer than 35 usable days exist.
 
 **What the dev data show** (details in [trend-backtest.md](trend-backtest.md)): with about 200 usable days no variant beats the baseline for E5 or diesel, the probability model is not validated and the hourly model is close to but not significantly better than "same hour yesterday" (E5: 1.57 vs. 1.63 cents, p = 0.15). The page therefore says "no clear change". The machinery is covered by tests on synthetic data (a learnable momentum signal is found and calibrated, an oil-led series is found, a random walk gives no fake model, features never look ahead).
+
+### 2.1b Next 12 hours
+
+Code: [`services/intraday_forecast.py`](../backend/app/services/intraday_forecast.py) (pure functions, tested in `tests/test_intraday_forecast.py`); UI in `IntradayForecast.svelte` at the top of the Forecast tab. A scheduled job regenerates it every 15 minutes (a few minutes after the price collector); requests are served from that cache.
+
+**Candidates.** The area-average price per Berlin hour (hours with partial coverage dropped), 12 hours ahead:
+* *yesterday's curve shifted to today's level*: the price 24 h earlier plus (latest hour − same hour yesterday);
+* *daily price rhythm*: the recency-weighted hour-of-day shape (weekday/weekend split, 28 complete days before the forecast day, half-life 3 days) plus a level from the latest 3 hours;
+* *mix*: the average of the two (yesterday's curve then shifted by the mean difference over the latest 3 hours);
+* baselines *same hour yesterday* and *stays as it is now*.
+
+**Selection per hour ahead.** All candidates are scored on identical (origin, hours-ahead) pairs in a walk-forward backtest over the last 60 days, one origin per hour. The first half picks the best method **for each hour ahead** and sets each method's band (10 % and 90 % error quantiles); the second half reports the typical error per hour ahead, the baselines' errors on the same pairs and how often the real price fell inside the band. If the picked method lacks an input for the live forecast (e.g. yesterday's hour is missing) the next-best one for that hour is used, and the page names the methods that were actually used. Certainty is *High* at a typical error up to 1 cent, *Medium* up to 2 cents, otherwise *Low* (`INTRADAY_*` in `analytics_config.py`).
+
+**Result on the dev data (Nov 2026, second half of the backtest, 527 test hours).** Anchoring on the current price wins for the first ~5 hours, the mix or the rhythm after that.
+
+| Fuel | Model | Same hour yesterday | Stays as now | Band hit (aim 80 %) |
+|---|---:|---:|---:|---:|
+| E5 | 1.42 ¢ | 1.63 ¢ | 3.75 ¢ | 75 % |
+| E10 | 1.38 ¢ | 1.56 ¢ | 3.80 ¢ | 76 % |
+| Diesel | 1.12 ¢ | 1.17 ¢ | 4.00 ¢ | 88 % |
+
+One hour ahead the typical error is about 0.5 cents, twelve hours ahead 1.4 to 1.8 cents. The half-life of 3 days was chosen by comparing 3, 7 and 14 days on these data (3 was best at every hour ahead), so it should be re-checked when more data exist.
+
+**Refusals.** No forecast with fewer than 48 test origins in each half, or when the newest hour is more than 3 hours old (the backtest is still returned).
+
+**Limits.** It is a rhythm-and-level model: sudden market moves are not foreseen, and the band only reflects the errors of normal days.
 
 ### 2.2 Best time to refuel
 
