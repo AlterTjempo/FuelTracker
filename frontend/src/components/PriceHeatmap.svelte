@@ -14,7 +14,7 @@
   let globalMax = 0
   let loading = true
   let noData = false
-  let hoveredPrice = null
+  let active = null // { day, hour, price } under the pointer or last tapped
 
   async function fetchHeatmap() {
     loading = true
@@ -71,7 +71,8 @@
 
 <div class="heatmap-wrap">
   <div class="header">
-    <h3>🌡️ Price Heatmap</h3>
+    <h3>Price by weekday and hour</h3>
+    <span class="hint">average, last 30 days</span>
   </div>
 
   {#if loading}
@@ -85,8 +86,10 @@
         <div class="legend-bar"></div>
         <span class="legend-label">High €{globalMax.toFixed(3)}</span>
       </div>
-      {#if hoveredPrice !== null}
-        <span class="hover-price">€{hoveredPrice.toFixed(3)}</span>
+      {#if active}
+        <span class="hover-price">{DAYS[active.day]} {String(active.hour).padStart(2, '0')}:00 · €{active.price.toFixed(3)}</span>
+      {:else}
+        <span class="hint">Tap or hover a cell</span>
       {/if}
     </div>
 
@@ -105,13 +108,15 @@
           <div class="hour-label">{String(hour).padStart(2, '0')}</div>
           {#each Array(7) as _, day}
             {@const price = grid[hour]?.[day] ?? null}
+            <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
             <div
               class="cell"
               class:empty={price === null}
+              class:active={active && active.day === day && active.hour === hour}
               style="background:{cellColor(price)}"
               title={price !== null ? `${DAYS[day]} ${String(hour).padStart(2,'0')}:00 — €${price.toFixed(3)}` : ''}
-              on:mouseenter={() => { if (price !== null) hoveredPrice = price }}
-              on:mouseleave={() => hoveredPrice = null}
+              on:mouseenter={() => { if (price !== null) active = { day, hour, price } }}
+              on:click={() => { if (price !== null) active = { day, hour, price } }}
             ></div>
           {/each}
         </div>
@@ -121,15 +126,17 @@
 </div>
 
 <style>
-  .heatmap-wrap {
-    /* parent card provides the container */
-  }
-
   .header {
     display: flex;
+    flex-wrap: wrap;
     align-items: baseline;
-    gap: 0.75rem;
+    gap: 0 0.75rem;
     margin-bottom: 0.75rem;
+  }
+
+  .hint {
+    font-size: 0.75rem;
+    color: #6e7681;
   }
 
   h3 {
@@ -137,11 +144,6 @@
     font-size: 1.05rem;
     font-weight: 600;
     color: #e6edf3;
-  }
-
-  .subtitle {
-    font-size: 0.75rem;
-    color: #6e7681;
   }
 
   .state {
@@ -235,7 +237,7 @@
   .cell {
     height: 10px;
     border-radius: 2px;
-    cursor: default;
+    cursor: pointer;
     transition: transform 0.1s, box-shadow 0.1s;
   }
 
@@ -244,6 +246,12 @@
     box-shadow: 0 0 0 1px rgba(255,255,255,0.3);
     z-index: 2;
     position: relative;
+  }
+
+  .cell.active {
+    box-shadow: 0 0 0 2px #e6edf3;
+    position: relative;
+    z-index: 2;
   }
 
   .cell.empty {

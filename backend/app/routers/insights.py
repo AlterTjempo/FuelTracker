@@ -52,13 +52,6 @@ def _mean(xs):
     return sum(xs) / len(xs)
 
 
-def _std(xs):
-    if len(xs) < 2:
-        return 0.0
-    m = _mean(xs)
-    return math.sqrt(sum((x - m) ** 2 for x in xs) / (len(xs) - 1))
-
-
 def _pearson(xs, ys):
     n = len(xs)
     if n < 3:

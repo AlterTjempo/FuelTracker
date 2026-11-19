@@ -450,11 +450,6 @@
     font-size: 1rem;
   }
 
-  .card-head span {
-    color: #7f94a8;
-    font-size: 0.8rem;
-  }
-
   .world-map {
     width: 100%;
     height: 430px;

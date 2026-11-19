@@ -138,7 +138,6 @@
   }
 
   // ── Energy News ───────────────────────────────────────────────────────────
-  const INITIAL_LIMIT = 5
   const LOAD_MORE_STEP = 5
 
   let newsItems = []
@@ -210,7 +209,6 @@
 
 <div class="oil-price">
   <div class="oil-header">
-    <span class="oil-icon">🛢️</span>
     <span class="oil-title">Brent Crude Oil Index</span>
   </div>
 
@@ -251,7 +249,6 @@
 
 <div class="energy-news">
   <div class="news-header">
-    <span class="news-icon">📰</span>
     <span class="news-title">Energy News</span>
   </div>
 
@@ -301,10 +298,6 @@
     align-items: center;
     gap: 0.5rem;
     margin-bottom: 0.75rem;
-  }
-
-  .oil-icon {
-    font-size: 1.2rem;
   }
 
   .oil-title {
@@ -414,10 +407,6 @@
     align-items: center;
     gap: 0.5rem;
     margin-bottom: 0.875rem;
-  }
-
-  .news-icon {
-    font-size: 1.1rem;
   }
 
   .news-title {

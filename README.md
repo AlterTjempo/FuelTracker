@@ -11,7 +11,8 @@ A hobby project to track fuel prices in your area. Gets data from the Tankerkoni
 - ⏰ Updates every 15 minutes automatically.
 - 💾 Keeps all historical data for analysis
 - 🎯 "Should I refuel now?" indicator (percentile of the current price vs. the same time of day, plus short-term trend)
-- 🔮 Outlook: weekday/hour price pattern for the next 7 days, Brent trend and relevant energy news
+- 🔮 Forecast: weekday/hour price pattern for the next 7 days, price heatmap, Brent trend and relevant energy news
+- 📍 Station list with search, "open now" filter, sort by price or distance, and a "usually cheapest" ranking
 - 🔍 Chart smoothing toggle and drag-to-zoom (down to 15-minute data)
 - 💰 Savings meter for logged-in users (compared against the area average at the time of refuelling)
 

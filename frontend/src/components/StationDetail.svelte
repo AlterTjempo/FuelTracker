@@ -60,12 +60,12 @@
         <h2>{station.name}</h2>
         <span class="brand-tag">{station.city || station.post_code || ''}</span>
         <span class="status" class:open={station.is_open} class:closed={!station.is_open}>
-          {station.is_open ? '🟢 Open' : '🔴 Closed'}
+          {station.is_open ? 'Open' : 'Closed'}
         </span>
       </div>
 
       <div class="address">
-        📍 {station.street} {station.house_number}, {station.post_code} {station.city}
+        {station.street} {station.house_number}, {station.post_code} {station.city}
       </div>
 
       <div class="map-container">
@@ -83,7 +83,7 @@
         {:else}
           <!-- Privacy: nothing is requested from openstreetmap.org until the user clicks. -->
           <button class="map-placeholder" on:click={() => (showMap = true)}>
-            🗺️ Show map<span>loads openstreetmap.org</span>
+            Show map<span>loads openstreetmap.org</span>
           </button>
         {/if}
         <a
@@ -92,7 +92,7 @@
           target="_blank"
           rel="noopener noreferrer"
         >
-          🧭 Route
+          Route
         </a>
       </div>
 

@@ -4,7 +4,6 @@ from sqlalchemy import func, and_, literal_column
 from typing import List, Optional
 from pydantic import BaseModel
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
 import analytics_config as cfg
 from cache import ttl_cached
 from limiter import limiter
@@ -18,9 +17,6 @@ router = APIRouter()
 
 # Time-of-day / day-of-week statistics are evaluated in German local time.
 LOCAL_TZ_NAME = "Europe/Berlin"
-LOCAL_TZ = ZoneInfo(LOCAL_TZ_NAME)
-# Max age of a station's latest price for it to count as a "current" price.
-CURRENT_PRICE_MAX_AGE = timedelta(minutes=30)
 
 
 def _local_ts():
@@ -82,6 +78,8 @@ class CurrentPriceResponse(BaseModel):
     e10: Optional[float]
     diesel: Optional[float]
     timestamp: datetime
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
 
 
 class LowestPriceResponse(BaseModel):
@@ -92,6 +90,8 @@ class LowestPriceResponse(BaseModel):
     city: Optional[str]
     is_open: bool
     timestamp: datetime
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
 
 
 class PriceStatsResponse(BaseModel):
@@ -146,6 +146,8 @@ def get_current_prices(
                 e10=price.e10,
                 diesel=price.diesel,
                 timestamp=price.timestamp,
+                latitude=station.latitude,
+                longitude=station.longitude,
             )
         )
 
@@ -179,6 +181,8 @@ def get_current_lowest_prices(
             Station.is_open,
             fuel_column.label("current_price"),
             FuelPrice.timestamp,
+            Station.latitude,
+            Station.longitude,
         )
         .join(
             subquery,
@@ -196,7 +200,16 @@ def get_current_lowest_prices(
     results = query.all()
 
     response = []
-    for station_id, name, city, is_open, current_price, timestamp in results:
+    for (
+        station_id,
+        name,
+        city,
+        is_open,
+        current_price,
+        timestamp,
+        slat,
+        slon,
+    ) in results:
         response.append(
             LowestPriceResponse(
                 fuel_type=fuel_type,
@@ -206,6 +219,8 @@ def get_current_lowest_prices(
                 city=city,
                 is_open=is_open,
                 timestamp=timestamp,
+                latitude=slat,
+                longitude=slon,
             )
         )
 
@@ -570,6 +585,8 @@ def get_go_now_indicator(
         "recommendation": "insufficient_data",
         "station_id": None,
         "station_name": None,
+        "station_lat": None,
+        "station_lon": None,
         "price_timestamp": None,
         "filter": applied,
     }
@@ -596,7 +613,14 @@ def get_go_now_indicator(
         .subquery()
     )
     best = (
-        db.query(fuel_column, Station.id, Station.name, FuelPrice.timestamp)
+        db.query(
+            fuel_column,
+            Station.id,
+            Station.name,
+            FuelPrice.timestamp,
+            Station.latitude,
+            Station.longitude,
+        )
         .join(
             latest_ts,
             and_(
@@ -650,6 +674,8 @@ def get_go_now_indicator(
         "recommendation": decision.recommendation,
         "station_id": best[1],
         "station_name": best[2],
+        "station_lat": best[4],
+        "station_lon": best[5],
         "price_timestamp": best[3],
         "hours_to_jump": (
             round(decision.hours_to_jump, 1)

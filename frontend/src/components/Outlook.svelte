@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import { getForecast, getMarketContext, getTrend } from '../lib/api.js'
   import TrendChart from './TrendChart.svelte'
+  import PriceHeatmap from './PriceHeatmap.svelte'
 
   export let fuelType = 'e5'
 
@@ -280,6 +281,11 @@
           </details>
         {/if}
       {/if}
+    </section>
+
+    <!-- 3b. WEEKDAY x HOUR HEATMAP -->
+    <section class="panel">
+      <PriceHeatmap {fuelType} />
     </section>
 
     <!-- 4. WHY THIS PREDICTION -->

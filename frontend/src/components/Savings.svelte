@@ -127,7 +127,7 @@
 </script>
 
 <div class="savings">
-  <h2>💰 Your Fuel Statistics</h2>
+  <h2>Your refuels</h2>
 
   {#if loading}
     <div class="state">Loading…</div>

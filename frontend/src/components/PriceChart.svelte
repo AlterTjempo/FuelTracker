@@ -1,5 +1,5 @@
 <script>
-  import { onMount, onDestroy } from 'svelte'
+  import { onMount, onDestroy, createEventDispatcher } from 'svelte'
   import { poll } from '../lib/poll.js'
   import { Chart } from '../lib/chartSetup.js'
   import API_BASE, { safeFetch } from '../lib/api.js'
@@ -20,8 +20,11 @@
   let zoom = null      // { min, max } in epoch ms, or null for the full range
   let bucketMinutes = 60
   let selection = null // live drag selection in pixels
-  let lastFetched = null
   let abortCtl = null
+
+  // Hands the full-range (un-zoomed) rows to the parent so it can show period
+  // statistics without fetching the same data twice.
+  const dispatch = createEventDispatcher()
 
   function readPref(key) {
     try { return localStorage.getItem(key) } catch { return null }
@@ -55,7 +58,7 @@
       })
       data = Array.isArray(result) ? result : []
       error = false
-      lastFetched = new Date()
+      if (!zoom) dispatch('data', data)
     } catch (e) {
       if (e.name === 'AbortError') return
       console.error('Error fetching data:', e)
@@ -310,7 +313,7 @@
       {#if zoom}
         Zoomed: {zoomLabel}{bucketMinutes === 15 ? ' · 15-min data' : ''}
       {:else}
-        🔍 Drag to zoom
+        <span class="drag">Drag across the chart to zoom</span>
       {/if}
     </span>
     <div class="tools">
@@ -362,6 +365,13 @@
   .hint {
     color: #8b949e;
     font-size: 0.8rem;
+  }
+
+  /* Touch drags scroll the page instead, so don't promise zooming there. */
+  @media (pointer: coarse) {
+    .drag {
+      display: none;
+    }
   }
 
   .tools {

@@ -1,40 +1,27 @@
 <script>
   import API_BASE, { safeFetch } from '../lib/api.js'
-  
+  import { eur3, getPosition, readPref, routeUrl, timeAgo, writePref } from '../lib/format.js'
+  import StationDetail from './StationDetail.svelte'
+
   export let fuelType = 'e5'
-  
+
   let indicator = null
   let loading = true
-  
-  // One compact control: which stations count. "Near me" asks the browser for
-  // the location once and sends it with the request; it is never stored.
+  let selectedStationId = null
+
+  // Which stations count. "Within x km" asks the browser for the location once
+  // and sends it with the request; it is never stored.
   const scopes = [
     { value: 'all', label: 'All stations' },
     { value: '5', label: 'Within 5 km' },
     { value: '10', label: 'Within 10 km' },
     { value: '25', label: 'Within 25 km' },
   ]
-  let scope = readScope()
-  let coords = null
+  let scope = readPref('fuel_go_scope', 'all')
   let scopeNote = ''
 
-  function readScope() {
-    try { return localStorage.getItem('fuel_go_scope') || 'all' } catch { return 'all' }
-  }
-
-  function getPosition() {
-    return new Promise((resolve, reject) => {
-      if (!navigator.geolocation) return reject(new Error('unsupported'))
-      navigator.geolocation.getCurrentPosition(
-        (p) => resolve({ lat: p.coords.latitude, lon: p.coords.longitude }),
-        reject,
-        { timeout: 8000, maximumAge: 600000 }
-      )
-    })
-  }
-
   async function onScopeChange() {
-    try { localStorage.setItem('fuel_go_scope', scope) } catch { /* ignore */ }
+    writePref('fuel_go_scope', scope)
     await fetchIndicator()
   }
 
@@ -44,7 +31,7 @@
       scopeNote = ''
       if (scope !== 'all') {
         try {
-          coords = coords || await getPosition()
+          const coords = await getPosition()
           params.set('lat', coords.lat)
           params.set('lon', coords.lon)
           params.set('max_distance_km', scope)
@@ -54,159 +41,126 @@
         }
       }
       indicator = await safeFetch(`${API_BASE}/prices/analytics/go-now?${params}`)
-      loading = false
     } catch (error) {
       console.error('Error fetching indicator:', error)
+    } finally {
       loading = false
     }
   }
-  
+
   $: fuelType && fetchIndicator()
-  
-  function getColor(recommendation) {
-    const colors = {
-      'excellent': '#10b981',
-      'good': '#22c55e',
-      'neutral': '#6b7280',
-      'wait': '#f59e0b',
-      'avoid': '#ef4444',
-      'insufficient_data': '#9ca3af'
-    }
-    return colors[recommendation] || '#9ca3af'
-  }
-  
-  function getIcon(recommendation) {
-    const icons = {
-      'excellent': '🎯',
-      'good': '✅',
-      'neutral': '➖',
-      'wait': '⏰',
-      'avoid': '❌',
-      'insufficient_data': '⏳'
-    }
-    return icons[recommendation] || '⏳'
-  }
-  
-  function getMessage(recommendation) {
-    const messages = {
-      'excellent': 'GO! Excellent price!',
-      'good': 'Good time to refuel',
-      'neutral': 'Average price',
-      'wait': 'Consider waiting',
-      'avoid': 'Wait for better price',
-      'insufficient_data': 'Need more data'
-    }
-    return messages[recommendation] || 'No data'
+
+  const LOOK = {
+    excellent: { color: '#10b981', text: 'Go! Excellent price' },
+    good: { color: '#22c55e', text: 'Good time to refuel' },
+    neutral: { color: '#8b949e', text: 'Average price' },
+    wait: { color: '#f59e0b', text: 'Consider waiting' },
+    avoid: { color: '#ef4444', text: 'Wait for a better price' },
   }
 
-  function minutesAgo(iso) {
-    const m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000))
-    return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago`
+  const TREND = {
+    falling: { color: '#10b981', arrow: '↘', word: 'Falling' },
+    rising: { color: '#ef4444', arrow: '↗', word: 'Rising' },
+    stable: { color: '#8b949e', arrow: '→', word: 'Stable' },
   }
 
-  $: priceAge = indicator?.price_timestamp ? minutesAgo(indicator.price_timestamp) : ''
-
-  function getTrendIcon(direction) {
-    const icons = { 'falling': '📉', 'rising': '📈', 'stable': '➡️' }
-    return icons[direction] || '➡️'
-  }
-
-  function getTrendLabel(direction, cents) {
-    if (direction === 'falling') return `Falling ${Math.abs(cents)}¢/hr`
-    if (direction === 'rising') return `Rising ${Math.abs(cents)}¢/hr`
-    return 'Stable'
-  }
-
-  function getTrendColor(direction) {
-    if (direction === 'falling') return '#10b981'
-    if (direction === 'rising') return '#ef4444'
-    return '#6b7280'
-  }
+  $: ok = indicator && indicator.recommendation !== 'insufficient_data'
+  $: look = ok ? LOOK[indicator.recommendation] || LOOK.neutral : null
+  $: trend = ok && indicator.trend_direction ? TREND[indicator.trend_direction] || TREND.stable : null
+  $: trendText = trend
+    ? indicator.trend_direction === 'stable'
+      ? 'Stable'
+      : `${trend.word} ${Math.abs(indicator.trend)}¢/h`
+    : ''
 </script>
 
-<div class="go-now-container">
+<section class="go" style="--tone: {look ? look.color : '#30363d'}">
+  <div class="top">
+    <h2>Should I refuel now?</h2>
+    <select class="scope" bind:value={scope} on:change={onScopeChange} aria-label="Which stations count">
+      {#each scopes as o}<option value={o.value}>{o.label}</option>{/each}
+    </select>
+  </div>
+  {#if scopeNote}<div class="note">{scopeNote}</div>{/if}
+
   {#if loading}
-    <div class="loading">Loading...</div>
-  {:else if indicator && indicator.recommendation !== 'insufficient_data'}
-    <div class="card" style="border-color: {getColor(indicator.recommendation)}">
-      <div class="header">
-        <span class="icon">{getIcon(indicator.recommendation)}</span>
-        <h3>Should I refuel now?</h3>
-        <select class="scope" bind:value={scope} on:change={onScopeChange} aria-label="Which stations count">
-          {#each scopes as o}<option value={o.value}>{o.label}</option>{/each}
-        </select>
-      </div>
-      {#if scopeNote}<div class="scope-note">{scopeNote}</div>{/if}
-      
-      <div class="recommendation" style="color: {getColor(indicator.recommendation)}">
-        {getMessage(indicator.recommendation)}
-      </div>
-
-      <div class="percentile-bar-section">
-        <div class="percentile-label">
-          Current best price: <strong>€{indicator.current_price}</strong>
-          {#if indicator.station_name}
-            <span class="where">at {indicator.station_name}{#if priceAge}{' · updated ' + priceAge}{/if}</span>
-          {/if}
-        </div>
-        <div class="percentile-track">
-          <div class="percentile-fill" style="width: {indicator.percentile}%; background: {getColor(indicator.recommendation)}"></div>
-          <div class="percentile-marker" style="left: {indicator.percentile}%">
-            <div class="marker-dot" style="background: {getColor(indicator.recommendation)}"></div>
-          </div>
-          <div class="percentile-labels">
-            <span class="cheapest">Cheapest</span>
-            <span class="priciest">Priciest</span>
-          </div>
-        </div>
-        <div class="percentile-detail">
-          Cheaper than <strong>{Math.round(100 - indicator.percentile)}%</strong> of prices at this time of day
-        </div>
-      </div>
-
-      {#if indicator.trend_direction}
-        <div class="trend-section">
-          <div class="trend-badge" style="background: {getTrendColor(indicator.trend_direction)}20; border-color: {getTrendColor(indicator.trend_direction)}40">
-            <span class="trend-icon">{getTrendIcon(indicator.trend_direction)}</span>
-            <span class="trend-text" style="color: {getTrendColor(indicator.trend_direction)}">
-              {getTrendLabel(indicator.trend_direction, indicator.trend)}
-            </span>
-          </div>
-        </div>
-      {/if}
-      
-      <div class="week-range">
-        <div class="range-item low">
-          <div class="range-label">Week Low</div>
-          <div class="range-value">€{indicator.week_low}</div>
-        </div>
-        <div class="range-item mid">
-          <div class="range-label">Week Median</div>
-          <div class="range-value">€{indicator.week_median}</div>
-        </div>
-        <div class="range-item high">
-          <div class="range-label">Week High</div>
-          <div class="range-value">€{indicator.week_high}</div>
-        </div>
-      </div>
-    </div>
+    <div class="note">Loading…</div>
+  {:else if !ok}
+    <p class="note">
+      {#if scope !== 'all'}No current prices from stations in this range. Try a wider range.{:else}Not enough data yet. Check back after more price data is collected.{/if}
+    </p>
   {:else}
-    <div class="card insufficient">
-      <div class="header">
-        <span class="icon">⏳</span>
-        <h3>Should I refuel now?</h3>
-        <select class="scope" bind:value={scope} on:change={onScopeChange} aria-label="Which stations count">
-          {#each scopes as o}<option value={o.value}>{o.label}</option>{/each}
-        </select>
+    <div class="verdict">{look.text}</div>
+
+    <div class="best">
+      <div class="best-main">
+        <span class="price">{eur3(indicator.current_price)}</span>
+        {#if indicator.station_name}
+          <span class="where">
+            at <button class="station" on:click={() => (selectedStationId = indicator.station_id)}>{indicator.station_name}</button>
+            {#if indicator.price_timestamp}<span class="age">· {timeAgo(indicator.price_timestamp)}</span>{/if}
+          </span>
+        {/if}
       </div>
-      <p class="no-data">
-        {#if scope !== 'all'}No current prices from stations in this range. Try a wider range.{:else}Not enough data yet. Check back after more price data is collected!{/if}
-      </p>
+      {#if indicator.station_name}
+        <a class="route" target="_blank" rel="noopener noreferrer"
+          href={routeUrl({ lat: indicator.station_lat, lon: indicator.station_lon, name: indicator.station_name })}>Route</a>
+      {/if}
     </div>
+
+    <div class="chips">
+      <span class="chip">Cheaper than <strong>{Math.round(100 - indicator.percentile)}%</strong> of prices at this hour</span>
+      {#if trend}
+        <span class="chip" style="color: {trend.color}">{trend.arrow} {trendText}</span>
+      {/if}
+    </div>
+
+    <details class="more">
+      <summary>Compare with this week</summary>
+      <div class="track" aria-hidden="true">
+        <div class="fill" style="width: {indicator.percentile}%"></div>
+        <div class="dot" style="left: {indicator.percentile}%"></div>
+      </div>
+      <div class="track-labels"><span>Cheapest</span><span>Priciest</span></div>
+      <div class="week">
+        <div><span class="lbl">Week low</span><span class="val low">{eur3(indicator.week_low)}</span></div>
+        <div><span class="lbl">Median</span><span class="val">{eur3(indicator.week_median)}</span></div>
+        <div><span class="lbl">Week high</span><span class="val high">{eur3(indicator.week_high)}</span></div>
+      </div>
+    </details>
   {/if}
-</div>
+</section>
+
+{#if selectedStationId}
+  <StationDetail stationId={selectedStationId} on:close={() => (selectedStationId = null)} />
+{/if}
 
 <style>
+  .go {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-left: 4px solid var(--tone);
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+  }
+
+  .top {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+  }
+
+  h2 {
+    margin: 0;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #8b949e;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
   .scope {
     margin-left: auto;
     background: #0f1419;
@@ -218,282 +172,219 @@
     min-height: 2rem;
   }
 
-  .scope-note {
+  .note {
     color: #8b949e;
-    font-size: 0.75rem;
-    margin: -0.5rem 0 0.75rem;
+    font-size: 0.85rem;
+    margin: 0.25rem 0 0;
+  }
+
+  .verdict {
+    font-size: 1.45rem;
+    font-weight: 700;
+    color: var(--tone);
+    line-height: 1.2;
+    margin-bottom: 0.6rem;
+  }
+
+  .best {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .best-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.15rem 0.5rem;
+  }
+
+  .price {
+    font-size: 2rem;
+    font-weight: 700;
+    color: #e6edf3;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
   }
 
   .where {
-    display: block;
     color: #8b949e;
-    font-size: 0.8rem;
-    margin-top: 0.125rem;
-  }
-
-  .go-now-container {
-    margin-bottom: 1rem;
-  }
-  
-  .card {
-    background: #0d1117;
-    border: 2px solid #30363d;
-    border-radius: 8px;
-    padding: 1rem;
-    transition: all 0.3s ease;
-  }
-  
-  .card:not(.insufficient):hover {
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  }
-  
-  .header {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    margin-bottom: 0.75rem;
-  }
-  
-  .icon {
-    font-size: 1.25rem;
-  }
-  
-  h3 {
-    margin: 0;
-    color: #c9d1d9;
-    font-size: 1rem;
-    font-weight: 600;
-  }
-  
-  .recommendation {
-    font-size: 1.1rem;
-    font-weight: bold;
-    text-align: center;
-    margin-bottom: 1rem;
-    padding: 0.5rem;
-    background: rgba(255, 255, 255, 0.03);
-    border-radius: 6px;
-  }
-
-  /* Percentile bar */
-  .percentile-bar-section {
-    margin-bottom: 1rem;
-  }
-
-  .percentile-label {
     font-size: 0.85rem;
-    color: #c9d1d9;
-    margin-bottom: 0.5rem;
-    text-align: center;
+    min-width: 0;
   }
 
-  .percentile-label strong {
+  .station {
+    background: none;
+    border: none;
+    padding: 0;
+    color: #c9d1d9;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .station:hover {
+    color: #58a6ff;
+    text-decoration: underline;
+  }
+
+  .age {
+    color: #6e7681;
+  }
+
+  .route {
+    flex-shrink: 0;
+    background: #3b82f6;
+    color: #fff;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 0.9rem;
+    border-radius: 8px;
+    padding: 0.6rem 1rem;
+    touch-action: manipulation;
+  }
+
+  .route:hover {
+    background: #2563eb;
+  }
+
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 0.75rem;
+  }
+
+  .chip {
+    font-size: 0.78rem;
+    color: #8b949e;
+    background: #1c2128;
+    border: 1px solid #30363d;
+    border-radius: 999px;
+    padding: 0.2rem 0.65rem;
+    font-weight: 500;
+  }
+
+  .chip strong {
     color: #e6edf3;
   }
 
-  .percentile-track {
-    position: relative;
-    height: 10px;
-    background: #21262d;
-    border-radius: 5px;
-    overflow: visible;
-    margin-bottom: 1.5rem; /* room for the absolutely-flowing Cheapest/Priciest labels */
+  .more {
+    margin-top: 0.75rem;
   }
 
-  .percentile-fill {
+  .more summary {
+    cursor: pointer;
+    color: #58a6ff;
+    font-size: 0.82rem;
+    list-style: none;
+    min-height: 1.75rem;
+    display: flex;
+    align-items: center;
+  }
+
+  .more summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .more summary::before {
+    content: '▸';
+    display: inline-block;
+    width: 1rem;
+    color: #8b949e;
+    transition: transform 0.15s;
+  }
+
+  .more[open] summary::before {
+    transform: rotate(90deg);
+  }
+
+  .track {
+    position: relative;
+    height: 8px;
+    background: #21262d;
+    border-radius: 4px;
+    margin-top: 0.75rem;
+  }
+
+  .fill {
     height: 100%;
-    border-radius: 5px;
-    transition: width 0.6s ease;
+    border-radius: 4px;
+    background: var(--tone);
     opacity: 0.35;
   }
 
-  .percentile-marker {
+  .dot {
     position: absolute;
     top: 50%;
-    transform: translate(-50%, -50%);
-    z-index: 1;
-  }
-
-  .marker-dot {
-    width: 16px;
-    height: 16px;
+    width: 14px;
+    height: 14px;
     border-radius: 50%;
-    border: 2px solid #0d1117;
-    box-shadow: 0 0 6px rgba(0,0,0,0.5);
+    background: var(--tone);
+    border: 2px solid #161b22;
+    transform: translate(-50%, -50%);
   }
 
-  .percentile-labels {
+  .track-labels {
     display: flex;
     justify-content: space-between;
-    padding-top: 0.375rem;
-  }
-
-  .percentile-labels span {
     font-size: 0.65rem;
     color: #6e7681;
     text-transform: uppercase;
-    letter-spacing: 0.3px;
+    letter-spacing: 0.04em;
+    margin-top: 0.3rem;
   }
 
-  .percentile-detail {
-    text-align: center;
-    font-size: 0.8rem;
-    color: #8b949e;
-    margin-top: 0.375rem;
-  }
-
-  .percentile-detail strong {
-    color: #e6edf3;
-  }
-
-  /* Trend badge */
-  .trend-section {
-    display: flex;
-    justify-content: center;
-    margin-bottom: 1rem;
-  }
-
-  .trend-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.375rem;
-    padding: 0.375rem 0.75rem;
-    border: 1px solid;
-    border-radius: 999px;
-    font-size: 0.8rem;
-  }
-
-  .trend-icon {
-    font-size: 0.9rem;
-  }
-
-  .trend-text {
-    font-weight: 600;
-  }
-
-  /* Week range */
-  .week-range {
-    display: flex;
-    justify-content: space-between;
+  .week {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
     gap: 0.5rem;
-    padding-top: 0.75rem;
-    border-top: 1px solid #30363d;
-    margin-top: 0.25rem;
-  }
-
-  .range-item {
+    margin-top: 0.75rem;
     text-align: center;
-    flex: 1;
   }
 
-  .range-label {
-    font-size: 0.6rem;
+  .week > div {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .lbl {
+    font-size: 0.68rem;
     color: #6e7681;
     text-transform: uppercase;
-    letter-spacing: 0.3px;
-    margin-bottom: 0.2rem;
+    letter-spacing: 0.04em;
   }
 
-  .range-value {
-    font-size: 0.9rem;
+  .val {
     font-weight: 700;
     color: #c9d1d9;
+    font-variant-numeric: tabular-nums;
   }
 
-  .range-item.low .range-value {
+  .val.low {
     color: #10b981;
   }
 
-  .range-item.high .range-value {
+  .val.high {
     color: #ef4444;
-  }
-  
-  .loading, .no-data {
-    text-align: center;
-    padding: 1.5rem;
-    color: #8b949e;
-  }
-  
-  .insufficient {
-    border-color: #30363d;
   }
 
   @media (min-width: 640px) {
-    .go-now-container {
+    .go {
+      padding: 1.25rem 1.5rem;
       margin-bottom: 1.5rem;
     }
-    .card {
-      padding: 1.25rem;
+    .verdict {
+      font-size: 1.75rem;
     }
-    .header {
-      gap: 0.75rem;
-      margin-bottom: 1rem;
+    .price {
+      font-size: 2.4rem;
     }
-    .icon {
-      font-size: 1.5rem;
-    }
-    h3 {
-      font-size: 1.125rem;
-    }
-    .recommendation {
-      font-size: 1.35rem;
-      margin-bottom: 1.25rem;
-      padding: 0.75rem;
-    }
-    .percentile-label {
+    .where {
       font-size: 0.95rem;
-    }
-    .percentile-track {
-      height: 12px;
-    }
-    .marker-dot {
-      width: 18px;
-      height: 18px;
-    }
-    .percentile-labels span {
-      font-size: 0.7rem;
-    }
-    .percentile-detail {
-      font-size: 0.85rem;
-    }
-    .trend-badge {
-      font-size: 0.85rem;
-      padding: 0.4rem 0.875rem;
-    }
-    .range-label {
-      font-size: 0.65rem;
-    }
-    .range-value {
-      font-size: 1rem;
-    }
-  }
-
-  @media (min-width: 1024px) {
-    .card {
-      padding: 1.5rem;
-    }
-    .card:not(.insufficient):hover {
-      transform: translateY(-2px);
-    }
-    .recommendation {
-      font-size: 1.5rem;
-      margin-bottom: 1.5rem;
-    }
-    .percentile-bar-section {
-      margin-bottom: 1.25rem;
-    }
-    .percentile-label {
-      font-size: 1rem;
-    }
-    .trend-badge {
-      font-size: 0.9rem;
-      padding: 0.5rem 1rem;
-    }
-    .range-label {
-      font-size: 0.7rem;
-    }
-    .range-value {
-      font-size: 1.1rem;
     }
   }
 </style>
